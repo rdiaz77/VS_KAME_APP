@@ -60,6 +60,6 @@ def get_stock_articulo(nombre_articulo, csv_file="stock_articulo.csv"):
 
 
 if __name__ == "__main__":
-    articulo = "ETK001"
+    articulo = "DZ117A-CON"
     df_stock = get_stock_articulo(articulo)
     print(df_stock.head())
