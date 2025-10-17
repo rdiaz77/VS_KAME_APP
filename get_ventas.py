@@ -1,18 +1,15 @@
 from kame_api import get_token
 import requests
 import pandas as pd
-import os
 from datetime import datetime, timedelta
+import os
+import json
 
 
-def get_informe_ventas_df(
-    fecha_desde,
-    fecha_hasta,
-    page=1,
-    per_page=100,
-    csv_file="ventas_2024.csv"
-):
-    """Fetch Informe de Ventas from Kame API and append to a single CSV file."""
+def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
+    """
+    Fetch Informe de Ventas from Kame API and return JSON + save raw files for inspection.
+    """
     token = get_token()
     headers = {
         "Authorization": f"Bearer {token}",
@@ -26,60 +23,40 @@ def get_informe_ventas_df(
     )
 
     print(f"🔍 Fetching ventas from {fecha_desde} to {fecha_hasta} ...")
-    response = requests.get(url, headers=headers)
+    response = requests.get(url, headers=headers, timeout=15)
 
     if response.status_code != 200:
         print("❌ Error:", response.status_code, response.text)
-        return pd.DataFrame()
+        return None
 
     data = response.json()
-    ventas = data.get("items", [])
 
+    # Save raw JSON
+    os.makedirs("source", exist_ok=True)
+    json_path = f"source/ventas_raw_{fecha_desde}_to_{fecha_hasta}.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+    print(f"💾 Saved raw JSON to {json_path}")
+
+    # Convert to DataFrame and save as CSV
+    ventas = data.get("items", [])
     if not ventas:
         print(f"⚠️ No sales data found for {fecha_desde} → {fecha_hasta}")
-        return pd.DataFrame()
+        return None
 
-    df = pd.DataFrame(ventas)
-    print(f"✅ Retrieved {len(df)} records.")
+    df = pd.json_normalize(ventas)
+    csv_path = f"source/ventas_raw_{fecha_desde}_to_{fecha_hasta}.csv"
+    df.to_csv(csv_path, index=False)
+    print(f"💾 Saved normalized CSV to {csv_path} ({len(df)} rows)")
 
-    # Append or create CSV
-    if os.path.exists(csv_file):
-        existing_df = pd.read_csv(csv_file)
-        combined_df = pd.concat([existing_df, df], ignore_index=True)
-        combined_df.drop_duplicates(subset=["Folio", "Fecha"], inplace=True)
-        combined_df.to_csv(csv_file, index=False)
-        print(f"💾 Appended to {csv_file} (now {len(combined_df)} rows)")
-    else:
-        df.to_csv(csv_file, index=False)
-        print(f"💾 Created new file: {csv_file}")
+    print("\n🧩 Columns returned by API:")
+    for col in df.columns:
+        print("  -", col)
 
     return df
 
 
-def get_month_ranges(year):
-    """Generate a list of (start_date, end_date) for each month of a given year."""
-    ranges = []
-    for month in range(1, 13):
-        start_date = datetime(year, month, 1)
-        # The trick: next month minus one day = end of this month
-        next_month = start_date.replace(day=28) + timedelta(days=4)
-        end_date = next_month - timedelta(days=next_month.day)
-        ranges.append((start_date.strftime("%Y-%m-%d"),
-                      end_date.strftime("%Y-%m-%d")))
-    return ranges
-
-
-def fetch_all_months(year=2024):
-    """Fetch ventas for all months of the year and consolidate them into one CSV."""
-    csv_file = f"ventas_{year}.csv"
-    month_ranges = get_month_ranges(year)
-
-    print(f"📆 Fetching sales for all months of {year} ...")
-    for fecha_desde, fecha_hasta in month_ranges:
-        get_informe_ventas_df(fecha_desde, fecha_hasta, csv_file=csv_file)
-
-    print(f"✅ All months fetched. Combined file saved as {csv_file}")
-
-
 if __name__ == "__main__":
-    fetch_all_months(2024)
+    # Example: fetch January 2024 for testing
+    get_informe_ventas_json("2024-01-01", "2024-01-31")
+#=== END OF FILE ===
