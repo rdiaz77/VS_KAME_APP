@@ -75,7 +75,7 @@ def add_product_info(
 
 if __name__ == "__main__":
     # Build absolute paths safely
-    input_path = os.path.join(BASE_DIR, "../test/ventas_enriched_test.csv")
+    input_path = os.path.join(BASE_DIR, "../test/ventas_enriched.csv")
     output_path = os.path.join(BASE_DIR, "../test/ventas_enriched_product.csv")
     product_path = os.path.join(BASE_DIR, "../data/lista_articulos_clean.csv")
     unmatched_output = os.path.join(BASE_DIR, "../test/unmatched_skus.csv")

@@ -1,11 +1,38 @@
 # === Drop unnecessary columns / round numbers / add thousand separators / standardize text / fix Folio ===
+import os
+import unicodedata
 import pandas as pd
+
+
+# === Path handling (robust to invisible Unicode or path issues) ===
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+def resolve_source_path(relative_path: str) -> str:
+    """Return an absolute path to the source CSV, handling Unicode or path mismatches safely."""
+    base = os.path.join(BASE_DIR, "..", relative_path)
+    if os.path.exists(base):
+        return base
+
+    # Try to find any .csv file in /source that looks like the ventas_raw file
+    source_dir = os.path.join(BASE_DIR, "..", "source")
+    for f in os.listdir(source_dir):
+        nf = unicodedata.normalize("NFC", f)
+        if f.endswith(".csv") and "ventas_raw" in nf and "2024" in nf:
+            print(f"⚙️ Found CSV candidate: {f}")
+            return os.path.join(source_dir, f)
+
+    print(f"❌ File not found: {base}")
+    return base
+
+
 
 def run_clean_sales_pipeline(source_path: str = "source/ventas_raw_2024-01-01_to-2024-01-31.csv"):
     """Drop unnecessary columns (keeping RUT), round numeric values, add thousand separators (with commas),
     standardize text capitalization, and convert 'Folio' to clean text."""
-    print(f"📂 Loading {source_path} ...")
-    df = pd.read_csv(source_path)
+    full_path = resolve_source_path(source_path)
+    print(f"📂 Loading {full_path} ...")
+
+    df = pd.read_csv(full_path)
 
     # === Drop unnecessary columns ===
     drop_cols = [
@@ -58,7 +85,8 @@ def run_clean_sales_pipeline(source_path: str = "source/ventas_raw_2024-01-01_to
         )
 
     # === Save output ===
-    output_path = "test/ventas_clean_preview.csv"
+    output_path = os.path.join(BASE_DIR, "..", "test", "ventas_clean_preview.csv")
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df_clean.to_csv(output_path, index=False)
     print(f"💾 Saved cleaned CSV → {output_path}")
     print(f"✅ Final shape: {df_clean.shape[0]} rows, {df_clean.shape[1]} columns")
@@ -68,4 +96,5 @@ def run_clean_sales_pipeline(source_path: str = "source/ventas_raw_2024-01-01_to
 
 if __name__ == "__main__":
     run_clean_sales_pipeline()
+
 # === END clean_sales_main.py ===
