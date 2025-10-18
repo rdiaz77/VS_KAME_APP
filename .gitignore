@@ -10,3 +10,5 @@ __pycache__/
 .DS_Store
 .env
 *.csv
+echo ".DS_Store" >> .gitignore
+git add .gitignore
