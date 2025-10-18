@@ -105,7 +105,7 @@ def clean_sales(df_raw: pd.DataFrame) -> pd.DataFrame:
 
     # 9️⃣ Add Region and ServicioSalud (preserving Comuna)
     mapping_path = os.path.expanduser(
-        "~/Desktop/Python_KAME_ERP/VS_KAME_APP/data/comunas_provincia_servicio_region(002).csv"
+        "~/Desktop/Python_KAME_ERP/VS_KAME_APP/data/comunas_provincia_servicio_region(003).csv"
     )
 
     if os.path.exists(mapping_path):

@@ -1,17 +1,15 @@
-from get_ventas import get_informe_ventas_json
-from clean_sales import clean_sales
-from db_utils import save_to_db, load_from_db
+import requests
 
-# 1️⃣ Fetch from API
-df_raw = get_informe_ventas_json("2024-01-01", "2024-01-31")
+from kame_api import get_token
 
-# 2️⃣ Clean and standardize
-df_clean = clean_sales(df_raw)
+BASE_URL = "https://api.kameone.cl/api/Maestro/getListArticulo"
 
-# 3️⃣ Save to DB
-save_to_db(df_clean)
+token = get_token()
+headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
-# 4️⃣ Verify
-df_check = load_from_db("SELECT Folio, Cliente, Comuna, TotalNeto FROM ventas LIMIT 5;")
-print(df_check)
-#== END =========================================================================
+for p in range(1, 5):
+    resp = requests.get(BASE_URL, headers=headers, params={"page": p, "per_page": 500})
+    data = resp.json()
+    print(
+        f"Page {p}: {len(data.get('items', []))} artículos, total={data.get('total')}"
+    )
