@@ -1,134 +1,73 @@
 # === view_db.py ===
-import os
-
-import pandas as pd
 import streamlit as st
-
-from db_utils import load_from_db
+import pandas as pd
+from db_utils import load_from_db, list_tables
 
 # -------------------------------------------------------
-# STREAMLIT PAGE CONFIG
+# APP CONFIG
 # -------------------------------------------------------
-st.set_page_config(
-    page_title="VitroScience Sales Dashboard",
-    layout="wide",
-)
+st.set_page_config(page_title="VitroScience Ventas DB Viewer", layout="wide")
+st.title("📊 VitroScience — Ventas Database Viewer")
+st.caption("Inspect data stored in your local SQLite database (`data/vitroscience.db`).")
+
 
 # -------------------------------------------------------
 # LOAD DATA
 # -------------------------------------------------------
-DB_PATH = os.path.abspath("data/vitroscience.db")
-TABLE_NAME = "ventas"
+@st.cache_data(show_spinner=False)
+def get_data(table_name: str = "ventas"):
+    """Load data safely from DB."""
+    try:
+        df = load_from_db(db_path="data/vitroscience.db", table_name=table_name)
+        if df.empty:
+            st.warning(f"⚠️ No data found in '{table_name}' — table is empty.")
+            return pd.DataFrame()
+        return df
+    except Exception as e:
+        st.error(f"❌ Failed to load data: {e}")
+        return pd.DataFrame()
 
-st.title("📊 VitroScience Sales Dashboard")
 
-# Load data from SQLite
-df = load_from_db(db_path=DB_PATH, query=f"SELECT * FROM {TABLE_NAME}")
+# -------------------------------------------------------
+# SIDEBAR CONTROLS
+# -------------------------------------------------------
+st.sidebar.header("⚙️ Settings")
 
-if df.empty:
-    st.error(
-        "❌ No data found in the database. Check that the table 'ventas' exists and contains rows."
-    )
+tables = list_tables("data/vitroscience.db")
+if not tables:
+    st.error("No tables found in database. Please run the ETL pipeline first.")
     st.stop()
 
-st.success(f"✅ Loaded {len(df)} rows from database.")
+table_selected = st.sidebar.selectbox("Select table", options=tables, index=tables.index("ventas") if "ventas" in tables else 0)
+df = get_data(table_selected)
+
+if df.empty:
+    st.stop()
+
+st.sidebar.markdown("### 🔍 Filters")
+
+# Add filters dynamically for smaller datasets
+if len(df) <= 5000:
+    for col in df.columns[:5]:  # show top 5 columns for filtering
+        unique_vals = sorted(df[col].dropna().unique().tolist())
+        if len(unique_vals) < 100:
+            selected = st.sidebar.multiselect(f"Filter by {col}", unique_vals)
+            if selected:
+                df = df[df[col].isin(selected)]
+
 
 # -------------------------------------------------------
-# DATA PREPARATION
+# DISPLAY
 # -------------------------------------------------------
-# Normalize columns (ensure consistent case)
-df.columns = df.columns.str.strip().str.title()
+st.subheader(f"📦 Table: `{table_selected}` — {len(df)} rows × {len(df.columns)} columns")
 
-# Ensure expected columns exist
-expected_cols = ["Fecha", "Cliente", "Comuna", "Region", "Serviciosalud", "Totalneto"]
-for col in expected_cols:
-    if col not in df.columns:
-        st.warning(f"⚠️ Column missing: {col}")
+# Replace deprecated use_container_width
+st.dataframe(df, width="stretch", height=600)
 
-# Convert Fecha to datetime
-if "Fecha" in df.columns:
-    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+# Basic stats
+with st.expander("📈 Summary statistics"):
+    st.dataframe(df.describe(include="all").transpose(), width="stretch")
 
-# -------------------------------------------------------
-# FILTERS
-# -------------------------------------------------------
-st.sidebar.header("🔍 Filters")
-
-# Cliente
-clientes = sorted(df["Cliente"].dropna().unique().tolist())
-cliente_filter = st.sidebar.multiselect("Cliente", options=clientes, default=[])
-
-# Comuna
-comunas = sorted(df["Comuna"].dropna().unique().tolist())
-comuna_filter = st.sidebar.multiselect("Comuna", options=comunas, default=[])
-
-# Región
-regiones = sorted(df["Region"].dropna().unique().tolist())
-region_filter = st.sidebar.multiselect("Región", options=regiones, default=[])
-
-# Servicio de Salud
-servicios = sorted(df["Serviciosalud"].dropna().unique().tolist())
-servicio_filter = st.sidebar.multiselect(
-    "Servicio de Salud", options=servicios, default=[]
-)
-
-# Fecha range
-if "Fecha" in df.columns:
-    min_date, max_date = df["Fecha"].min(), df["Fecha"].max()
-    date_range = st.sidebar.date_input("Rango de fechas", [min_date, max_date])
-else:
-    date_range = None
-
-# Apply filters
-df_filtered = df.copy()
-
-if cliente_filter:
-    df_filtered = df_filtered[df_filtered["Cliente"].isin(cliente_filter)]
-if comuna_filter:
-    df_filtered = df_filtered[df_filtered["Comuna"].isin(comuna_filter)]
-if region_filter:
-    df_filtered = df_filtered[df_filtered["Region"].isin(region_filter)]
-if servicio_filter:
-    df_filtered = df_filtered[df_filtered["Serviciosalud"].isin(servicio_filter)]
-if date_range and len(date_range) == 2:
-    start_date, end_date = pd.to_datetime(date_range)
-    df_filtered = df_filtered[
-        (df_filtered["Fecha"] >= start_date) & (df_filtered["Fecha"] <= end_date)
-    ]
-
-# -------------------------------------------------------
-# SUMMARY METRICS
-# -------------------------------------------------------
-if not df_filtered.empty:
-    total_sales = (
-        df_filtered["Totalneto"].sum() if "Totalneto" in df_filtered.columns else 0
-    )
-    total_clients = df_filtered["Cliente"].nunique()
-    total_comunas = df_filtered["Comuna"].nunique()
-
-    col1, col2, col3 = st.columns(3)
-    col1.metric("💰 Total Ventas (Neto)", f"${total_sales:,.0f}")
-    col2.metric("👥 Clientes únicos", total_clients)
-    col3.metric("🏙️ Comunas cubiertas", total_comunas)
-
-    # -------------------------------------------------------
-    # DATA TABLE
-    # -------------------------------------------------------
-    st.divider()
-    st.subheader("📄 Detalle de Ventas")
-
-    st.dataframe(df_filtered, width="stretch", height=600)
-
-    # CSV download
-    csv = df_filtered.to_csv(index=False).encode("utf-8")
-    st.download_button(
-        "⬇️ Descargar CSV",
-        csv,
-        "ventas_filtradas.csv",
-        "text/csv",
-        use_container_width=True,  # download_button still supports this param
-    )
-else:
-    st.warning("⚠️ No data matches your filters.")
-
-# === END view_db.py ===
+# Preview bottom rows
+with st.expander("🔽 Last 10 rows"):
+    st.dataframe(df.tail(10), width="stretch")
