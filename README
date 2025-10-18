@@ -1,1 +1,5 @@
 #API documentation=https://documenter.getpostman.com/view/8240263/T17FCpKj
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt

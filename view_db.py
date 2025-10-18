@@ -1,73 +1,54 @@
-# === view_db.py ===
 import streamlit as st
 import pandas as pd
-from db_utils import load_from_db, list_tables
+import sqlite3
+from pathlib import Path
 
-# -------------------------------------------------------
-# APP CONFIG
-# -------------------------------------------------------
-st.set_page_config(page_title="VitroScience Ventas DB Viewer", layout="wide")
-st.title("📊 VitroScience — Ventas Database Viewer")
-st.caption("Inspect data stored in your local SQLite database (`data/vitroscience.db`).")
+# === CONFIGURATION ===
+DB_PATH = Path("data/vitroscience.db")
 
+st.title("🧪 VitroScience — Database Viewer")
 
-# -------------------------------------------------------
-# LOAD DATA
-# -------------------------------------------------------
-@st.cache_data(show_spinner=False)
-def get_data(table_name: str = "ventas"):
-    """Load data safely from DB."""
-    try:
-        df = load_from_db(db_path="data/vitroscience.db", table_name=table_name)
-        if df.empty:
-            st.warning(f"⚠️ No data found in '{table_name}' — table is empty.")
-            return pd.DataFrame()
-        return df
-    except Exception as e:
-        st.error(f"❌ Failed to load data: {e}")
-        return pd.DataFrame()
+# === STEP 1: Connect to SQLite ===
+if not DB_PATH.exists():
+    st.error(f"Database not found at {DB_PATH}. Run `save_to_sqlite.py` first.")
+    st.stop()
 
+conn = sqlite3.connect(DB_PATH)
 
-# -------------------------------------------------------
-# SIDEBAR CONTROLS
-# -------------------------------------------------------
-st.sidebar.header("⚙️ Settings")
+# === STEP 2: Show available tables ===
+tables = pd.read_sql(
+    "SELECT name FROM sqlite_master WHERE type='table';", conn
+)["name"].tolist()
 
-tables = list_tables("data/vitroscience.db")
 if not tables:
-    st.error("No tables found in database. Please run the ETL pipeline first.")
+    st.warning("No tables found in the database.")
     st.stop()
 
-table_selected = st.sidebar.selectbox("Select table", options=tables, index=tables.index("ventas") if "ventas" in tables else 0)
-df = get_data(table_selected)
+selected_table = st.selectbox("Select a table to view:", tables)
 
-if df.empty:
-    st.stop()
+# === STEP 3: Show table info ===
+st.subheader(f"📊 Preview of `{selected_table}`")
 
-st.sidebar.markdown("### 🔍 Filters")
+query = f"SELECT * FROM {selected_table} LIMIT 100;"
+df = pd.read_sql(query, conn)
+st.dataframe(df, use_container_width=True)
 
-# Add filters dynamically for smaller datasets
-if len(df) <= 5000:
-    for col in df.columns[:5]:  # show top 5 columns for filtering
-        unique_vals = sorted(df[col].dropna().unique().tolist())
-        if len(unique_vals) < 100:
-            selected = st.sidebar.multiselect(f"Filter by {col}", unique_vals)
-            if selected:
-                df = df[df[col].isin(selected)]
+# === STEP 4: Optional query input ===
+st.markdown("---")
+st.subheader("🔍 Run a custom SQL query")
 
+custom_query = st.text_area(
+    "Enter SQL query",
+    value=f"SELECT * FROM {selected_table} LIMIT 10;",
+    height=120,
+)
 
-# -------------------------------------------------------
-# DISPLAY
-# -------------------------------------------------------
-st.subheader(f"📦 Table: `{table_selected}` — {len(df)} rows × {len(df.columns)} columns")
+if st.button("Run Query"):
+    try:
+        result_df = pd.read_sql(custom_query, conn)
+        st.success(f"Query executed successfully! Showing {len(result_df)} rows.")
+        st.dataframe(result_df, use_container_width=True)
+    except Exception as e:
+        st.error(f"Error: {e}")
 
-# Replace deprecated use_container_width
-st.dataframe(df, width="stretch", height=600)
-
-# Basic stats
-with st.expander("📈 Summary statistics"):
-    st.dataframe(df.describe(include="all").transpose(), width="stretch")
-
-# Preview bottom rows
-with st.expander("🔽 Last 10 rows"):
-    st.dataframe(df.tail(10), width="stretch")
+conn.close()
