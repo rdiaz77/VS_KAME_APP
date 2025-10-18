@@ -1,24 +1,26 @@
+# === clean_sales.py (adds thousand separator for key financial columns) ===
 import os
 
-import numpy as np
 import pandas as pd
 
 
 def clean_sales(df_raw: pd.DataFrame) -> pd.DataFrame:
     """
     Clean and standardize KAME sales data.
-    - Drops only the requested columns
-    - Rounds numeric fields safely (sign preserved)
-    - Converts Folio & refs to text (no decimals)
-    - Adds Region and ServicioSalud by matching Comuna (preserving Comuna)
-    - Reorders columns so Region and ServicioSalud appear after Ciudad
+
+    CHANGES IN THIS VERSION:
+    - Drop 'PorcDescuento'
+    - Convert to numeric (treat '.' as decimal separator)
+    - Round Cantidad, PrecioUnitario, Descuento, TotalNeto,
+      CostoVentaUnitario, CostoVentaTotal, MargenContrib to 0 decimals (integers)
+    - Format financial columns with thousand separators
     """
     df = df_raw.copy()
 
     # 1️⃣ Normalize column names
     df.columns = df.columns.str.strip().str.replace(" ", "_").str.lower()
 
-    # 2️⃣ Drop only the requested columns
+    # 2️⃣ Drop irrelevant columns
     drop_only = [
         "multidirnombre",
         "multidirdireccion",
@@ -60,28 +62,37 @@ def clean_sales(df_raw: pd.DataFrame) -> pd.DataFrame:
     }
     df.rename(columns=rename_map, inplace=True)
 
-    # 4️⃣ Clean text fields (title-case)
+    # 3.1️⃣ Drop PorcDescuento
+    if "PorcDescuento" in df.columns:
+        df.drop(columns=["PorcDescuento"], inplace=True)
+
+    # 4️⃣ Clean text fields
     for col in ["Cliente", "Comuna", "Ciudad", "Producto", "Vendedor"]:
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.title()
 
-    # 5️⃣ Round numeric fields (preserve sign)
-    round_cols = [
+    # 5️⃣ Convert numeric fields treating '.' as decimal and round to 0 decimals
+    numeric_cols = [
         "Cantidad",
         "PrecioUnitario",
         "Descuento",
-        "PorcDescuento",
         "TotalNeto",
         "CostoVentaUnitario",
         "CostoVentaTotal",
         "MargenContrib",
     ]
-    for col in round_cols:
+    for col in numeric_cols:
         if col in df.columns:
-            df[col] = pd.to_numeric(df[col], errors="coerce")
-            df[col] = np.trunc(df[col].fillna(0)).astype(int)
+            df[col] = (
+                pd.to_numeric(
+                    df[col].astype(str).str.replace(",", "").str.strip(),
+                    errors="coerce",
+                )
+                .round(0)
+                .astype("Int64")
+            )
 
-    # 6️⃣ Convert Folio & refs to TEXT (no decimals)
+    # 6️⃣ Convert Folio & refs to TEXT
     for col in ["Folio", "FolioRef1", "FolioRef2", "FolioRef3"]:
         if col in df.columns:
             df[col] = df[col].apply(
@@ -103,11 +114,10 @@ def clean_sales(df_raw: pd.DataFrame) -> pd.DataFrame:
     if {"Folio", "Producto", "Fecha"}.issubset(df.columns):
         df.drop_duplicates(subset=["Folio", "Producto", "Fecha"], inplace=True)
 
-    # 9️⃣ Add Region and ServicioSalud (preserving Comuna)
+    # 9️⃣ Add Region and ServicioSalud
     mapping_path = os.path.expanduser(
         "~/Desktop/Python_KAME_ERP/VS_KAME_APP/data/comunas_provincia_servicio_region(003).csv"
     )
-
     if os.path.exists(mapping_path):
         comunas_map = pd.read_csv(mapping_path)
         comunas_map.columns = comunas_map.columns.str.strip().str.title()
@@ -139,32 +149,84 @@ def clean_sales(df_raw: pd.DataFrame) -> pd.DataFrame:
         df["Region"] = None
         df["ServicioSalud"] = None
 
-    # 🔟 Reorder columns so Region and ServicioSalud appear after Ciudad
-    desired_order = []
-    if "Ciudad" in df.columns:
-        for col in df.columns:
-            desired_order.append(col)
-            if col == "Ciudad":
-                if "Region" in df.columns:
-                    desired_order.append("Region")
-                if "ServicioSalud" in df.columns:
-                    desired_order.append("ServicioSalud")
-        # Drop duplicates in case Region/ServicioSalud already exist later
-        df = df[[c for c in desired_order if c in df.columns]]
+    # 🔟 Sync Nombreunegocio using Familia (unchanged)
+    product_path = os.path.expanduser(
+        "~/Desktop/Python_KAME_ERP/VS_KAME_APP/data/lista_articulos_full.csv"
+    )
+    if os.path.exists(product_path):
+        print("🔄 Updating Nombreunegocio using Familia from product master list...")
+        try:
+            df_products = pd.read_csv(product_path, dtype=str)
+            df_products.columns = df_products.columns.str.strip().str.title()
 
-    # Remove any hidden duplicate column names (causes SQLAlchemy DuplicateColumnError)
+            if "Sku" in df_products.columns and "Familia" in df_products.columns:
+                df_products["Sku"] = df_products["Sku"].astype(str).str.strip()
+                df_products["Familia"] = (
+                    df_products["Familia"].astype(str).str.strip().str.title()
+                )
+                df["SKU"] = df["SKU"].astype(str).str.strip()
+
+                before = len(df_products)
+                df_products = df_products.drop_duplicates(subset=["Sku"], keep="first")
+                duplicates_removed = before - len(df_products)
+                if duplicates_removed > 0:
+                    print(
+                        f"ℹ️ Removed {duplicates_removed} duplicate SKU(s) before merge."
+                    )
+
+                sku_to_familia = df_products.set_index("Sku")["Familia"].to_dict()
+
+                if "Nombreunegocio" in df.columns:
+                    df["Nombreunegocio"] = df.apply(
+                        lambda row: sku_to_familia.get(
+                            row["SKU"], row["Nombreunegocio"]
+                        ),
+                        axis=1,
+                    )
+                    print(
+                        f"✅ Nombreunegocio updated using Familia ({len(sku_to_familia):,} SKUs)."
+                    )
+                else:
+                    df["Nombreunegocio"] = df["SKU"].map(sku_to_familia)
+                    print(
+                        f"✅ Nombreunegocio created from Familia ({len(sku_to_familia):,} SKUs)."
+                    )
+
+            else:
+                print(
+                    "⚠️ Columns 'Sku' or 'Familia' missing in product master — skipping update."
+                )
+        except Exception as e:
+            print(f"⚠️ Error updating Nombreunegocio from master: {e}")
+    else:
+        print(f"⚠️ Product reference file not found: {product_path}")
+
+    # 💰 Add thousand separator formatting for display columns
+    money_cols = [
+        "PrecioUnitario",
+        "Descuento",
+        "TotalNeto",
+        "CostoVentaUnitario",
+        "CostoVentaTotal",
+        "MargenContrib",
+    ]
+    for col in money_cols:
+        if col in df.columns:
+            df[col] = df[col].apply(lambda x: f"{int(x):,}" if pd.notnull(x) else None)
+
+    # 🧱 Final cleanup
+    df.columns = df.columns.str.strip()
     df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
-    print(
-        f"🧹 Cleaned {len(df)} rows, {len(df.columns)} unique columns — enriched with Region & ServicioSalud."
-    )
+    print("🧹 Cleaned data — financial columns formatted with thousand separators.")
     return df
 
 
-# Optional standalone test
 if __name__ == "__main__":
     df_test = pd.read_csv("source/ventas_raw_2024-01-01_to_2024-01-31.csv")
     df_clean = clean_sales(df_test)
-    print("✅ Final columns (ordered):", df_clean.columns.tolist())
-    print(df_clean.head())
+    print("✅ Final columns:", df_clean.columns.tolist())
+    os.makedirs("data", exist_ok=True)
+    df_clean.to_csv("data/ventas_clean_preview.csv", index=False)
+    print("💾 Preview saved to data/ventas_clean_preview.csv")
 # === END clean_sales.py ===
