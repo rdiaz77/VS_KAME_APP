@@ -40,7 +40,7 @@ if __name__ == "__main__":
     records = get_stock_sample(100)
     if records:
         df = pd.DataFrame(records)
-        df.to_csv("inventario_stock_sample.csv",
+        df.to_csv("test/stock/raw/inventario_stock_sample.csv",
                   index=False, encoding="utf-8-sig")
         print(f"💾 Saved {len(df)} rows to inventario_stock_sample.csv")
         print(df.head())
