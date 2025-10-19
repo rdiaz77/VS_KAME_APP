@@ -5,11 +5,14 @@ Automatic test runner for the full VS_KAME_APP sales data pipeline:
 2. clean_sales_main.py
 3. enrich_location.py
 4. enrich_product.py
+5. save_to_sqlite.py
 """
 
-import os
-import sys
 import importlib
+import os
+import sqlite3
+import sys
+
 import pandas as pd
 
 # === Path setup ===
@@ -20,6 +23,7 @@ ROOT_DIR = os.path.join(BASE_DIR, "..")
 if ROOT_DIR not in sys.path:
     sys.path.append(ROOT_DIR)
 
+
 # === Step 1: Get ventas from Kame ===
 def test_get_ventas():
     print("\n🚀 STEP 1: get_ventas.py")
@@ -28,6 +32,7 @@ def test_get_ventas():
     assert df is not None and not df.empty, "❌ get_ventas returned empty DataFrame"
     print(f"✅ get_ventas: {len(df)} rows")
     return df
+
 
 # === Step 2: Clean sales ===
 def test_clean_sales():
@@ -40,15 +45,24 @@ def test_clean_sales():
     print(f"✅ Clean sales: {len(df)} rows")
     return df
 
+
 # === Step 3: Enrich location ===
 def test_enrich_location():
     print("\n🌎 STEP 3: enrich_location.py")
     mod = importlib.import_module("pipeline.enrich_location")
-    input_path = os.path.join(ROOT_DIR, "test", "ventas_clean_preview.csv")
-    df = pd.read_csv(input_path)
-    df_enriched = mod.add_location_info(df)
 
-    # 💾 Save enriched output here
+    input_path = os.path.join(ROOT_DIR, "test", "ventas_clean_preview.csv")
+
+    # 🔧 Explicitly resolve absolute path to mapping file
+    mapping_path = "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/data/comunas_provincia_servicio_region(003).csv"
+
+    if not os.path.exists(mapping_path):
+        raise FileNotFoundError(f"❌ Mapping file missing at: {mapping_path}")
+
+    df = pd.read_csv(input_path)
+    df_enriched = mod.add_location_info(df, mapping_path=mapping_path)
+
+    # 💾 Save enriched output
     out_path = os.path.join(ROOT_DIR, "test", "ventas_enriched.csv")
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     df_enriched.to_csv(out_path, index=False)
@@ -57,6 +71,7 @@ def test_enrich_location():
     assert "Region" in df_enriched.columns, "❌ 'Region' column missing"
     print(f"✅ Enrich location: {len(df_enriched)} rows")
     return df_enriched
+
 
 # === Step 4: Enrich product ===
 def test_enrich_product():
@@ -76,6 +91,26 @@ def test_enrich_product():
     print(f"✅ Enrich product: {len(df_final)} rows")
     return df_final
 
+
+# === Step 5: Save to SQLite ===
+def test_save_to_sqlite():
+    print("\n🗄️  STEP 5: save_to_sqlite.py")
+    importlib.import_module("pipeline.save_to_sqlite")
+
+    # Check that DB file and table were created
+    db_path = os.path.join(ROOT_DIR, "data", "vitroscience.db")
+    table_name = "ventas_enriched_product"
+
+    assert os.path.exists(db_path), f"❌ Database not found at {db_path}"
+
+    conn = sqlite3.connect(db_path)
+    count = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()[0]
+    conn.close()
+
+    assert count > 0, f"❌ Table '{table_name}' is empty or missing"
+    print(f"✅ Saved {count} rows into SQLite table '{table_name}'")
+
+
 # === Run all steps ===
 if __name__ == "__main__":
     print("🧪 Starting VS_KAME_APP pipeline test...\n")
@@ -83,5 +118,6 @@ if __name__ == "__main__":
     test_clean_sales()
     test_enrich_location()
     test_enrich_product()
+    test_save_to_sqlite()
     print("\n🎉 All pipeline steps completed successfully!")
-# === End of test_pipeline.py ===
+# ==== end of test_pipeline.py ===

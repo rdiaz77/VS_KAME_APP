@@ -52,3 +52,4 @@ if st.button("Run Query"):
         st.error(f"Error: {e}")
 
 conn.close()
+# End of file view_db.py

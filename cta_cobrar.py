@@ -1,75 +1,127 @@
+# === cts_cobrar.py (date-windowed final version) ===
 import requests
-import json
 import pandas as pd
-from kame_api import get_token as get_access_token  # ✅ using your existing token system
+import os
+import hashlib
+import time
+from datetime import datetime, timedelta
+from kame_api import get_token as get_access_token
 
-# Optional: silence urllib3 SSL warning
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning, module="urllib3")
 
-# API endpoint
 BASE_URL = "https://api.kameone.cl/api/Contabilidad/getCuentaxCobrar"
 
 
+def daterange_chunks(start_date, end_date, days=31):
+    """Generate date ranges split by N days (default monthly)."""
+    start = datetime.strptime(start_date, "%Y-%m-%d")
+    end = datetime.strptime(end_date, "%Y-%m-%d")
+    while start < end:
+        chunk_end = min(start + timedelta(days=days), end)
+        yield start.strftime("%Y-%m-%d"), chunk_end.strftime("%Y-%m-%d")
+        start = chunk_end + timedelta(days=1)
+
+
 def get_cuentas_por_cobrar(
-    fecha_desde="2024-01-01",
-    fecha_hasta="2024-12-31",
-    page=1,
-    per_page=100
+    fecha_desde="2020-01-01",
+    fecha_hasta="2025-10-18",
+    per_page=100,
+    chunk_days=31
 ):
-    """Fetches Cuentas por Cobrar (Accounts Receivable) from Kame API."""
-    
+    """
+    ✅ Robust method to fetch *all* CxC using rolling date windows.
+
+    Features:
+      - Fetches data month by month (or custom days)
+      - Deduplicates globally by Id/NumeroDocumento
+      - Handles API rate limits and retries
+    """
+
     token = get_access_token()
-    
-    params = {
-        "page": page,
-        "per_page": per_page,
-        "fechaVencimientoDesde": fecha_desde,
-        "fechaVencimientoHasta": fecha_hasta
-    }
+    headers = {"Authorization": f"Bearer {token}"}
+    all_rows, seen_ids = [], set()
 
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    for start, end in daterange_chunks(fecha_desde, fecha_hasta, chunk_days):
+        print(f"\n🗓️ Fetching CxC for window {start} → {end}")
+        page = 1
+        while True:
+            params = {
+                "page": page,
+                "per_page": per_page,
+                "fechaVencimientoDesde": start,
+                "fechaVencimientoHasta": end
+            }
 
-    print(f"🔍 Fetching CxC page {page} ({fecha_desde} → {fecha_hasta}) ...")
-    response = requests.get(BASE_URL, headers=headers, params=params)
-    print(f"HTTP Status: {response.status_code}")
+            resp = requests.get(BASE_URL, headers=headers, params=params)
+            print(f"  🔍 Page {page} | HTTP {resp.status_code}")
 
-    if response.status_code != 200:
-        print(f"❌ Error {response.status_code}: {response.text}")
-        return None
+            if resp.status_code == 429:
+                print("  ⚠️ Rate limit hit, waiting 15s...")
+                time.sleep(15)
+                continue
+            if resp.status_code != 200:
+                print(f"  ❌ Error {resp.status_code}: {resp.text}")
+                break
 
-    data = response.json()
+            data = resp.json()
+            items = data.get("items") or data.get("data") or []
+            if not items:
+                break
 
-    # ✅ Extract data correctly from "items"
-    if isinstance(data, dict) and "items" in data:
-        records = data["items"]
+            new_count = 0
+            for rec in items:
+                rec_id = (
+                    rec.get("Id")
+                    or rec.get("NumeroDocumento")
+                    or hash(frozenset(rec.items()))
+                )
+                if rec_id not in seen_ids:
+                    seen_ids.add(rec_id)
+                    all_rows.append(rec)
+                    new_count += 1
+
+            print(f"  ✅ Added {new_count} new unique records (Total: {len(all_rows)})")
+
+            # stop if no new data in this window
+            if new_count == 0:
+                break
+
+            page += 1
+            time.sleep(0.3)
+
+    df = pd.DataFrame(all_rows)
+    print(f"\n📦 Finished: total unique records = {len(df)}")
+    return df
+
+
+def save_if_changed(df, output_path):
+    """Save CSV only if changed."""
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    tmp = output_path + ".tmp"
+    df.to_csv(tmp, index=False, encoding="utf-8-sig")
+
+    def file_hash(p):
+        with open(p, "rb") as f:
+            return hashlib.sha256(f.read()).hexdigest()
+
+    if not os.path.exists(output_path):
+        os.replace(tmp, output_path)
+        print(f"💾 Saved new file: {output_path}")
+    elif file_hash(tmp) != file_hash(output_path):
+        os.replace(tmp, output_path)
+        print(f"💾 Updated file with new data: {output_path}")
     else:
-        print(f"⚠️ Unexpected JSON structure: keys = {list(data.keys())}")
-        records = []
-
-    print(f"✅ Retrieved {len(records)} records.")
-    return records
+        os.remove(tmp)
+        print("⚙️ No changes detected, file not updated.")
 
 
+# 🧪 Standalone run
 if __name__ == "__main__":
-    all_records = []
-    page = 1
-
-    while True:
-        records = get_cuentas_por_cobrar(page=page)
-        if not records:
-            break
-        all_records.extend(records)
-        print(f"📄 Retrieved {len(records)} records (Total: {len(all_records)})")
-        page += 1
-
-    if all_records:
-        df = pd.DataFrame(all_records)
-        df.to_csv("cuentas_por_cobrar_2024.csv", index=False)
-        print(f"💾 Saved {len(df)} rows to cuentas_por_cobrar_2024.csv")
+    df = get_cuentas_por_cobrar()
+    if not df.empty:
+        save_if_changed(df, "test/cuentas_por_cobrar_full.csv")
         print(df.head())
     else:
-        print("⚠️ No records found or empty response.")
+        print("⚠️ No data retrieved.")
+# === END cts_cobrar.py ===
