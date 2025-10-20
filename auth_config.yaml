@@ -1,0 +1,22 @@
+credentials:
+  usernames:
+    admin:
+      name: "Rafael Díaz"
+      password: "$2b$12$K4xYFj9s7p7mV6pSvBLpZ.0t4j4MGQ9KxYtNsnHGuS0X8zjZ5ae6K"  # example hash
+      role: "Admin"
+    sales:
+      name: "Sales User"
+      password: "$2b$12$HUVy1u3dpwo1mT6vu4D9meAZ3K2HKjBe3G.2geqvG7mM2sH9KQ0Tu"  # example hash
+      role: "Sales"
+    viewer:
+      name: "Viewer User"
+      password: "$2b$12$yLU1v9TbdINXqzMGU1F9J.5Shc7tN8RxJz6uP0fRCOvIbkhDUZb7G"  # example hash
+      role: "Viewer"
+
+cookie:
+  name: vs_app_cookie
+  key: secret_key
+  expiry_days: 1
+
+preauthorized:
+  emails: []

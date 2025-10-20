@@ -1,7 +1,9 @@
-import requests
-import pandas as pd
-from kame_api import get_token as get_access_token
 import warnings
+
+import pandas as pd
+import requests
+
+from kame_api import get_token as get_access_token
 
 warnings.filterwarnings("ignore", category=UserWarning, module="urllib3")
 
@@ -11,10 +13,7 @@ BASE_URL = "https://api.kameone.cl/api/Maestro/getListUnidadNegocio"
 def get_unidades_negocio():
     """Fetch list of unidades de negocio from Kame API."""
     token = get_access_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     print("🔍 Fetching unidades de negocio...")
     response = requests.get(BASE_URL, headers=headers)
