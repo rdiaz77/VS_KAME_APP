@@ -1,21 +1,30 @@
+# dashboard/scorecard.py
 import streamlit as st
-from utils.db_utils import load_table
-from utils.charts import line_chart
+from tabs.sales_analysis_tab import show_sales_analysis
+from tabs.sales_analysis_tab import show_sales_analysis
+
+
 
 def show_scorecard():
     st.title("🏠 Balanced Scorecard — VitroScience")
 
-    # Example metrics
-    col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Revenue YTD", "$4.2M", "+5.3%")
-    col2.metric("Gross Margin", "48%", "+2.1%")
-    col3.metric("Customer Retention", "94%", "+1.2%")
-    col4.metric("Training Hours", "12.5", "+15%")
-
-    st.divider()
-    tabs = st.tabs(["💰 Finanzas", "👥 Clientes", "⚙️ Internal", "📚 Learning & Growth"])
+    tabs = st.tabs(
+        [
+            "📊 Sales Analysis",
+            "👥 Customers",
+            "⚙️ Internal Processes",
+            "📚 Learning & Growth",
+        ]
+    )
 
     with tabs[0]:
-        df = load_table("ventas")  # Example table
-        st.subheader("Revenue Trend")
-        st.plotly_chart(line_chart(df, "Fecha", "Total", "Revenue Over Time"), use_container_width=True)
+        show_sales_analysis()
+
+    with tabs[1]:
+        st.write("👥 Customers — coming soon")
+
+    with tabs[2]:
+        st.write("⚙️ Internal Processes — coming soon")
+
+    with tabs[3]:
+        st.write("📚 Learning & Growth — coming soon")
