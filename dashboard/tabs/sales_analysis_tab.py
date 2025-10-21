@@ -1,3 +1,4 @@
+# === dashboard/tabs/sales_analysis_tab.py ===
 import sqlite3
 import subprocess
 from datetime import datetime
@@ -57,32 +58,111 @@ def get_total_sales_and_period():
         return None, None, None
 
 
+# === Fetch Other Metrics ===
+def get_additional_metrics():
+    """Fetch complementary metrics from the SQLite database."""
+    if not DB_PATH.exists():
+        return None, None, None, None, None
+
+    conn = sqlite3.connect(DB_PATH)
+    metrics = {}
+
+    try:
+        # --- Total CxC ---
+        query_cxc = "SELECT SUM(Saldo) AS total_cxc FROM cuentas_por_cobrar;"
+        res_cxc = pd.read_sql(query_cxc, conn)
+        metrics["total_cxc"] = float(res_cxc["total_cxc"].iloc[0] or 0)
+
+        # --- No. Clientes ---
+        query_clients = "SELECT COUNT(DISTINCT Rut) AS total_clients FROM ventas_enriched_product;"
+        res_clients = pd.read_sql(query_clients, conn)
+        metrics["no_clients"] = int(res_clients["total_clients"].iloc[0] or 0)
+
+        # --- Gross Revenue (MargenContrib) ---
+        query_gross = "SELECT SUM(MargenContrib) AS gross_rev FROM ventas_enriched_product;"
+        res_gross = pd.read_sql(query_gross, conn)
+        metrics["gross_rev"] = float(res_gross["gross_rev"].iloc[0] or 0)
+
+        # --- Clientes Nuevos (simplified placeholder logic) ---
+        metrics["new_clients"] = metrics["no_clients"]
+
+        # --- C. de trabajo (placeholder) ---
+        metrics["working_capital"] = None
+
+    except Exception as e:
+        st.error(f"Error fetching metrics: {e}")
+        return None, None, None, None, None
+    finally:
+        conn.close()
+
+    return (
+        metrics["total_cxc"],
+        metrics["no_clients"],
+        metrics["gross_rev"],
+        metrics["working_capital"],
+        metrics["new_clients"],
+    )
+
+
 # === Show Sales Analysis Tab ===
 def show_sales_analysis():
-    """Display the Sales Analysis tab with total, period, and manual update."""
+    """Display the Sales Analysis tab with 3-column KPI grid and manual update."""
     st.header("📊 Sales Analysis")
 
-    col1, col2 = st.columns([2, 1])
+    # --- MAIN KPI GRID ---
+    col1, col2, col3 = st.columns(3)
 
-    # --- LEFT COLUMN: Total Sales + Period ---
+    # === COLUMN 1 ===
     with col1:
-        st.subheader("💰 Total Sales (from SQLite)")
-
+        st.subheader("💰 Total Sales (KAME)")
         total_sales, start_date, end_date = get_total_sales_and_period()
+        total_cxc, no_clients, gross_rev, working_capital, new_clients = get_additional_metrics()
+
         if total_sales is not None:
             if start_date and end_date:
-                period_text = f"Period: {start_date} → {end_date}"
+                period_text = f"{start_date} → {end_date}"
             else:
-                period_text = "Period: not available"
+                period_text = "N/A"
+            st.metric(label=f"Total Sales\n({period_text})", value=f"${total_sales:,.0f}")
+        else:
+            st.metric(label="Total Sales", value="—")
 
-            st.metric(
-                label=f"Total Sales\n({period_text})",
-                value=f"${total_sales:,.0f}"
-            )
+        if gross_rev is not None:
+            st.metric(label="Gross Revenue", value=f"${gross_rev:,.0f}")
+        else:
+            st.metric(label="Gross Revenue", value="—")
 
-    # --- RIGHT COLUMN: Small "Run Sales Pipeline" Button ---
+        # Placeholder row
+        st.metric(label="—", value="—")
+
+    # === COLUMN 2 ===
     with col2:
-        # Inject CSS for smaller, modern button style
+        if total_cxc is not None:
+            st.metric(label="Total CxC", value=f"${total_cxc:,.0f}")
+        else:
+            st.metric(label="Total CxC", value="—")
+
+        if working_capital is not None:
+            st.metric(label="C. de trabajo", value=f"${working_capital:,.0f}")
+        else:
+            st.metric(label="C. de trabajo", value="—")
+
+        # Placeholder row
+        st.metric(label="No. Deudores", value="—")
+
+    # === COLUMN 3 ===
+    with col3:
+        if no_clients is not None:
+            st.metric(label="No. Clientes", value=f"{no_clients:,}")
+        else:
+            st.metric(label="No. Clientes", value="—")
+
+        if new_clients is not None:
+            st.metric(label="Clientes Nuevos", value=f"{new_clients:,}")
+        else:
+            st.metric(label="Clientes Nuevos", value="—")
+
+        # Inject CSS for small modern button
         st.markdown(
             """
             <style>
@@ -104,10 +184,8 @@ def show_sales_analysis():
             unsafe_allow_html=True,
         )
 
-        # --- Small button only ---
+        # Update Button
         run_update = st.button("Run Sales Pipeline", key="update_btn")
-
-        # --- Button logic ---
         if run_update:
             if not PIPELINE_SCRIPT.exists():
                 st.error(f"❌ Pipeline script not found at {PIPELINE_SCRIPT}")
@@ -129,9 +207,8 @@ def show_sales_analysis():
                     st.text(e.stderr)
 
     st.markdown("---")
-
     st.info(
-        "💡 This section shows the total sales for the available period "
+        "💡 This section shows key performance metrics from the VitroScience database "
         "and allows you to manually trigger the sales update pipeline."
     )
-# === Fetch KAME Sales Data from API ===
+# End of file dashboard/tabs/sales_analysis_tab.py
