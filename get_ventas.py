@@ -1,9 +1,10 @@
-from kame_api import get_token
-import requests
-import pandas as pd
-from datetime import datetime, timedelta
-import os
 import json
+import os
+
+import pandas as pd
+import requests
+
+from kame_api import get_token
 
 
 def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
@@ -11,10 +12,7 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
     Fetch Informe de Ventas from Kame API and return JSON + save raw files for inspection.
     """
     token = get_token()
-    headers = {
-        "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json"
-    }
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
     url = (
         "https://api.kameone.cl/api/Documento/getInformeVentas"
@@ -32,8 +30,8 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
     data = response.json()
 
     # Save raw JSON
-    os.makedirs("source", exist_ok=True)
-    json_path = f"source/ventas_raw_{fecha_desde}_to_{fecha_hasta}.json"
+    os.makedirs("test", exist_ok=True)
+    json_path = f"test/ventas/raw/ventas_raw_{fecha_desde}_to_{fecha_hasta}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     print(f"💾 Saved raw JSON to {json_path}")
@@ -45,7 +43,7 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
         return None
 
     df = pd.json_normalize(ventas)
-    csv_path = f"source/ventas_raw_{fecha_desde}_to_{fecha_hasta}.csv"
+    csv_path = f"test/ventas/raw/ventas_raw_{fecha_desde}_to_{fecha_hasta}.csv"
     df.to_csv(csv_path, index=False)
     print(f"💾 Saved normalized CSV to {csv_path} ({len(df)} rows)")
 
@@ -59,4 +57,4 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
 if __name__ == "__main__":
     # Example: fetch January 2024 for testing
     get_informe_ventas_json("2024-01-01", "2024-01-31")
-#=== END OF FILE ===
+# === END OF FILE ===

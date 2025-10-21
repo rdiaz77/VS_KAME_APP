@@ -13,7 +13,9 @@ def add_product_info(
         product_path = os.path.join(BASE_DIR, "../data/lista_articulos_clean.csv")
 
     if unmatched_output is None:
-        unmatched_output = os.path.join(BASE_DIR, "../test/unmatched_skus.csv")
+        unmatched_output = os.path.join(
+            BASE_DIR, "../test/ventas/unmatched/unmatched_skus.csv"
+        )
 
     print(f"🧩 Enriching with product info from {product_path} ...")
 
@@ -75,10 +77,14 @@ def add_product_info(
 
 if __name__ == "__main__":
     # Build absolute paths safely
-    input_path = os.path.join(BASE_DIR, "../test/ventas_enriched.csv")
-    output_path = os.path.join(BASE_DIR, "../test/ventas_enriched_product.csv")
+    input_path = os.path.join(BASE_DIR, "../test/ventas/clean/ventas_enriched.csv")
+    output_path = os.path.join(
+        BASE_DIR, "../test/ventas/clean/ventas_enriched_product.csv"
+    )
     product_path = os.path.join(BASE_DIR, "../data/lista_articulos_clean.csv")
-    unmatched_output = os.path.join(BASE_DIR, "../test/unmatched_skus.csv")
+    unmatched_output = os.path.join(
+        BASE_DIR, "../test/ventas/unmatched/unmatched_skus.csv"
+    )
 
     if not os.path.exists(input_path):
         print(f"❌ Input file not found: {input_path}")

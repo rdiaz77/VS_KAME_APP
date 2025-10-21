@@ -1,15 +1,16 @@
 import os
+
 import pandas as pd
 
 # Get the folder where this script lives
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-def add_location_info(
-    df: pd.DataFrame,
-    mapping_path: str = None
-) -> pd.DataFrame:
+
+def add_location_info(df: pd.DataFrame, mapping_path: str = None) -> pd.DataFrame:
     if mapping_path is None:
-        mapping_path = os.path.join(BASE_DIR, "../data/comunas_provincia_servicio_region(003).csv")
+        mapping_path = os.path.join(
+            BASE_DIR, "../data/comunas_provincia_servicio_region(003).csv"
+        )
 
     print(f"🌎 Enriching with Region and ServicioSalud from {mapping_path} ...")
 
@@ -26,7 +27,7 @@ def add_location_info(
     df_merged = df.merge(
         mapping[["Comuna_norm", "Region", "ServicioSalud"]],
         on="Comuna_norm",
-        how="left"
+        how="left",
     ).drop(columns=["Comuna_norm"])
 
     if "Ciudad" in df_merged.columns:
@@ -47,9 +48,11 @@ def add_location_info(
 
 if __name__ == "__main__":
     # Build absolute paths safely
-    input_path = os.path.join(BASE_DIR, "../test/ventas_clean_preview.csv")
-    output_path = os.path.join(BASE_DIR, "../test/ventas_enriched.csv")
-    mapping_path = os.path.join(BASE_DIR, "../data/comunas_provincia_servicio_region(003).csv")
+    input_path = os.path.join(BASE_DIR, "../test/ventas/clean/ventas_clean_preview.csv")
+    output_path = os.path.join(BASE_DIR, "../test/ventas/clean/ventas_enriched.csv")
+    mapping_path = os.path.join(
+        BASE_DIR, "../data/comunas_provincia_servicio_region(003).csv"
+    )
 
     if not os.path.exists(input_path):
         print(f"❌ Input file not found: {input_path}")
