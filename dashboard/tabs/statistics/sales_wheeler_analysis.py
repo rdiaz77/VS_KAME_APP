@@ -64,7 +64,7 @@ def wheeler_chart(df, value_col, title):
 
 def show_sales_wheeler_analysis():
     """Display Wheeler-style process behavior charts for sales."""
-    st.subheader("📊 Donald J. Wheeler — Sales Statistical Analysis")
+    st.subheader("📊 Sales Statistical Analysis")
 
     df_monthly = get_monthly_sales()
     if df_monthly.empty:

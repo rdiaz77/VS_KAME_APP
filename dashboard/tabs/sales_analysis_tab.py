@@ -235,11 +235,11 @@ def show_sales_analysis():
 
 
 # === Donald J. Wheeler Statistical Section ===
-st.markdown("---")
-st.subheader("📊 Statistical Process Behavior Analysis (Donald J. Wheeler)")
+    st.markdown("---")
+    st.subheader("📊 Statistical Wheeler Analysis")
 
 # Display Wheeler charts from the external module
-show_sales_wheeler_analysis()
+    show_sales_wheeler_analysis()
 
 
 # End of file dashboard/tabs/sales_analysis_tab.py
