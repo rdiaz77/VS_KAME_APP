@@ -1,6 +1,28 @@
-pandas
-numpy
-requests
-streamlit
-openpyxl
-python-dotenv
+# === Core Frameworks ===
+streamlit>=1.37.0
+pandas>=2.2.0
+numpy>=1.26.0
+
+# === Data Handling & Storage ===
+sqlite-utils>=3.36.0
+openpyxl>=3.1.2          # Excel I/O
+python-dateutil>=2.9.0
+pyarrow>=16.0.0          # Fast CSV/Parquet support (optional but recommended)
+
+# === Visualization ===
+matplotlib>=3.9.0
+
+# === Web Requests & APIs ===
+requests>=2.32.0
+
+# === Environment & Config ===
+python-dotenv>=1.0.1
+pathlib>=1.0.1
+
+# === CLI / System Tools ===
+tqdm>=4.66.0             # Progress bars for fetch scripts
+rich>=13.7.0             # Optional: better logging display
+
+# === Optional (development helpers) ===
+bandit>=1.7.5            # Security linter
+black>=24.4.2            # Code formatter

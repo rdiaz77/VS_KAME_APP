@@ -1,8 +1,7 @@
 # dashboard/scorecard.py
 import streamlit as st
-from tabs.sales_analysis_tab import show_sales_analysis
-from tabs.sales_analysis_tab import show_sales_analysis
 
+from dashboard.tabs.sales_analysis_tab import show_sales_analysis
 
 
 def show_scorecard():

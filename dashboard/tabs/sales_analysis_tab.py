@@ -1,11 +1,24 @@
+import sys
+from pathlib import Path
+
+
+
 # === dashboard/tabs/sales_analysis_tab.py ===
 import sqlite3
 import subprocess
 from datetime import datetime
-from pathlib import Path
+
 
 import pandas as pd
 import streamlit as st
+
+from dashboard.tabs.statistics.sales_wheeler_analysis import show_sales_wheeler_analysis
+ROOT_DIR = Path(__file__).resolve().parent.parent.parent  # points to VS_KAME_APP
+if str(ROOT_DIR) not in sys.path:
+    sys.path.insert(0, str(ROOT_DIR))
+
+
+
 
 # === Paths ===
 DB_PATH = Path(__file__).parent.parent.parent / "data" / "vitroscience.db"
@@ -74,12 +87,16 @@ def get_additional_metrics():
         metrics["total_cxc"] = float(res_cxc["total_cxc"].iloc[0] or 0)
 
         # --- No. Clientes ---
-        query_clients = "SELECT COUNT(DISTINCT Rut) AS total_clients FROM ventas_enriched_product;"
+        query_clients = (
+            "SELECT COUNT(DISTINCT Rut) AS total_clients FROM ventas_enriched_product;"
+        )
         res_clients = pd.read_sql(query_clients, conn)
         metrics["no_clients"] = int(res_clients["total_clients"].iloc[0] or 0)
 
         # --- Gross Revenue (MargenContrib) ---
-        query_gross = "SELECT SUM(MargenContrib) AS gross_rev FROM ventas_enriched_product;"
+        query_gross = (
+            "SELECT SUM(MargenContrib) AS gross_rev FROM ventas_enriched_product;"
+        )
         res_gross = pd.read_sql(query_gross, conn)
         metrics["gross_rev"] = float(res_gross["gross_rev"].iloc[0] or 0)
 
@@ -116,14 +133,18 @@ def show_sales_analysis():
     with col1:
         st.subheader("💰 Total Sales (KAME)")
         total_sales, start_date, end_date = get_total_sales_and_period()
-        total_cxc, no_clients, gross_rev, working_capital, new_clients = get_additional_metrics()
+        total_cxc, no_clients, gross_rev, working_capital, new_clients = (
+            get_additional_metrics()
+        )
 
         if total_sales is not None:
             if start_date and end_date:
                 period_text = f"{start_date} → {end_date}"
             else:
                 period_text = "N/A"
-            st.metric(label=f"Total Sales\n({period_text})", value=f"${total_sales:,.0f}")
+            st.metric(
+                label=f"Total Sales\n({period_text})", value=f"${total_sales:,.0f}"
+            )
         else:
             st.metric(label="Total Sales", value="—")
 
@@ -211,4 +232,14 @@ def show_sales_analysis():
         "💡 This section shows key performance metrics from the VitroScience database "
         "and allows you to manually trigger the sales update pipeline."
     )
+
+
+# === Donald J. Wheeler Statistical Section ===
+st.markdown("---")
+st.subheader("📊 Statistical Process Behavior Analysis (Donald J. Wheeler)")
+
+# Display Wheeler charts from the external module
+show_sales_wheeler_analysis()
+
+
 # End of file dashboard/tabs/sales_analysis_tab.py
