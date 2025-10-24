@@ -1,0 +1,11 @@
+{
+  "Estado": "Error",
+  "Id": 1129498,
+  "Fecha": "2025-10-24 01:53:06",
+  "Error": [
+    {
+      "MemberNames": [""],
+      "ErrorMessage": "El rango entre fechaDesde y fechaHasta no puede superar 1 mes (31 días)"
+    }
+  ]
+}

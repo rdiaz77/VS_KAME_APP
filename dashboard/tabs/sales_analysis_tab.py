@@ -1,23 +1,18 @@
-import sys
-from pathlib import Path
-
-
-
 # === dashboard/tabs/sales_analysis_tab.py ===
 import sqlite3
 import subprocess
+import sys
 from datetime import datetime
-
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
 
 from dashboard.tabs.statistics.sales_wheeler_analysis import show_sales_wheeler_analysis
+
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent  # points to VS_KAME_APP
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
-
-
 
 
 # === Paths ===
@@ -222,7 +217,7 @@ def show_sales_analysis():
                     )
                     st.success("✅ Pipeline executed successfully.")
                     st.text(result.stdout)
-                    st.experimental_rerun()
+                    st.rerun()
                 except subprocess.CalledProcessError as e:
                     st.error("❌ Error running pipeline.")
                     st.text(e.stderr)
@@ -233,12 +228,11 @@ def show_sales_analysis():
         "and allows you to manually trigger the sales update pipeline."
     )
 
-
-# === Donald J. Wheeler Statistical Section ===
+    # === Donald J. Wheeler Statistical Section ===
     st.markdown("---")
     st.subheader("📊 Statistical Wheeler Analysis")
 
-# Display Wheeler charts from the external module
+    # Display Wheeler charts from the external module
     show_sales_wheeler_analysis()
 
 

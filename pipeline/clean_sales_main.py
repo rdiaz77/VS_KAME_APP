@@ -1,11 +1,10 @@
 # === pipeline/clean_sales_main.py ===
 import os
+
 import pandas as pd
 
 
-def run_clean_sales_pipeline(
-    source_path: str = None,
-):
+def run_clean_sales_pipeline(source_path: str = None):
     """
     Clean and standardize KAME sales data.
     - Drops only the specified unnecessary columns (keeping Rut)
@@ -14,13 +13,21 @@ def run_clean_sales_pipeline(
     - Converts Folio to text and removes trailing '.0'
     - Saves output to /test/ventas/clean/ventas_clean_preview.csv
     """
+
     # === Resolve file path safely ===
     base_dir = os.path.dirname(os.path.abspath(__file__))
+
     if source_path is None:
-        source_path = os.path.join(
-            base_dir,
-            "../test/ventas/raw/ventas_raw_2024-01-01_to_2024-01-31.csv",
+        # Prefer the full-year combined file if it exists
+        candidate_full = os.path.join(base_dir, "../test/ventas/raw/ventas_raw.csv")
+        candidate_fallback = os.path.join(
+            base_dir, "../test/ventas/raw/ventas_raw_2024-01-01_to_2024-01-31.csv"
         )
+
+        if os.path.exists(candidate_full):
+            source_path = candidate_full
+        else:
+            source_path = candidate_fallback
 
     print(f"📂 Loading {source_path} ...")
 
@@ -68,28 +75,28 @@ def run_clean_sales_pipeline(
             df[col] = pd.to_numeric(df[col], errors="coerce").round(0)
 
     # === Normalize text columns (capitalize each word) ===
-    text_cols = ["RznSocial", "Direccion", "Comuna", "Ciudad", "Region", "ServicioSalud"]
+    text_cols = [
+        "RznSocial",
+        "Direccion",
+        "Comuna",
+        "Ciudad",
+        "Region",
+        "ServicioSalud",
+    ]
     for col in text_cols:
         if col in df.columns:
-            df[col] = (
-                df[col]
-                .astype(str)
-                .str.strip()
-                .str.lower()
-                .str.title()
-            )
+            df[col] = df[col].astype(str).str.strip().str.lower().str.title()
 
     # === Convert Folio to text and remove trailing ".0" ===
     if "Folio" in df.columns:
         df["Folio"] = (
-            df["Folio"]
-            .astype(str)
-            .str.replace(r"\.0$", "", regex=True)
-            .str.strip()
+            df["Folio"].astype(str).str.replace(r"\.0$", "", regex=True).str.strip()
         )
 
     # === Save output ===
-    output_path = os.path.join(base_dir, "../test/ventas/clean/ventas_clean_preview.csv")
+    output_path = os.path.join(
+        base_dir, "../test/ventas/clean/ventas_clean_preview.csv"
+    )
     os.makedirs(os.path.dirname(output_path), exist_ok=True)
     df.to_csv(output_path, index=False)
 
@@ -105,4 +112,5 @@ def run_clean_sales_pipeline(
 
 if __name__ == "__main__":
     run_clean_sales_pipeline()
+
 ## === End of pipeline/clean_sales_main.py ===

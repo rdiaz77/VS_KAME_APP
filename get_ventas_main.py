@@ -13,13 +13,21 @@ Usage:
     python get_ventas_main.py [fecha_desde] [fecha_hasta]
 Example:
     python get_ventas_main.py 2024-02-01 2024-02-29
+
+New:
+    python get_ventas_main.py 2023   # fetches full year in monthly chunks and runs full pipeline
 """
 
 import os
+import shutil
 import sys
 
-# === Import pipeline components ===
-from get_ventas import get_informe_ventas_json
+import pandas as pd
+
+# === Import fetchers ===
+from get_ventas import get_informe_ventas_json, get_ventas_full_year
+
+# === Import pipeline components (original working flow) ===
 from pipeline import (
     add_location_info,
     add_product_info,
@@ -28,25 +36,52 @@ from pipeline import (
 )
 
 
-def run_full_pipeline(fecha_desde: str, fecha_hasta: str):
-    """Run the entire VS_KAME_APP sales data pipeline."""
+def run_full_pipeline(
+    fecha_desde: str, fecha_hasta: str, raw_override: str | None = None
+):
+    """
+    Run the entire VS_KAME_APP sales data pipeline.
+
+    If raw_override is provided and exists, we skip the API fetch
+    and use that CSV as the raw input (e.g., full-year combined file).
+    """
     print("\n🧪 Starting VS_KAME_APP pipeline...\n")
 
-    raw_path = f"test/ventas/raw/ventas_raw_{fecha_desde}_to_{fecha_hasta}.csv"
+    # Where the step-1 fetch would normally save its CSV
+    raw_path_default = f"test/ventas/raw/ventas_raw_{fecha_desde}_to_{fecha_hasta}.csv"
     enriched_path = "test/ventas/clean/ventas_enriched.csv"
     product_enriched_path = "test/ventas/clean/ventas_enriched_product.csv"
 
-    # === STEP 1: Fetch ventas ===
-    print("🚀 STEP 1: Fetching ventas from Kame API")
-    df_raw = get_informe_ventas_json(fecha_desde, fecha_hasta)
-    if df_raw is None or df_raw.empty:
-        print("❌ No data fetched. Exiting pipeline.")
-        return
-    print(f"✅ Raw data fetched ({len(df_raw)} rows)")
+    # === STEP 1: Raw data source resolution ===
+    if raw_override and os.path.exists(raw_override):
+        print(f"🚀 STEP 1: Using pre-fetched raw file → {raw_override}")
+        raw_path = raw_override
+        df_raw = pd.read_csv(raw_path)
+    else:
+        print("🚀 STEP 1: Fetching ventas from Kame API")
+        df_raw = get_informe_ventas_json(fecha_desde, fecha_hasta)
+        if df_raw is None or df_raw.empty:
+            print("❌ No data fetched. Exiting pipeline.")
+            return
+        print(f"✅ Raw data fetched ({len(df_raw)} rows)")
+        raw_path = raw_path_default
+
+    # Ensure cleaner sees the expected input path (non-breaking)
+    os.makedirs("test/ventas/raw", exist_ok=True)
+    cleaner_input = "test/ventas/raw/ventas_raw.csv"
+    try:
+        if os.path.abspath(raw_path) != os.path.abspath(cleaner_input):
+            shutil.copy(raw_path, cleaner_input)
+            print(f"📦 Copied raw file to cleaner input → {cleaner_input}")
+    except Exception as e:
+        print(f"⚠️ Could not copy raw file to {cleaner_input}: {e}")
 
     # === STEP 2: Clean sales data ===
     print("\n🧹 STEP 2: Cleaning sales data")
-    df_clean = run_clean_sales_pipeline(source_path=raw_path)
+    df_clean = run_clean_sales_pipeline(source_path=cleaner_input)
+    if df_clean is None or df_clean.empty:
+        print("❌ Cleaning produced no rows. Exiting pipeline.")
+        return
     print(f"✅ Cleaned data ready ({len(df_clean)} rows)")
 
     # === STEP 3: Enrich with location ===
@@ -70,14 +105,40 @@ def run_full_pipeline(fecha_desde: str, fecha_hasta: str):
     print("\n✅ Pipeline completed successfully!\n")
 
 
+def run_full_year_pipeline(year: int):
+    """
+    Year mode: fetch all ventas for a given year (month-by-month),
+    combine to a single CSV, and run the full pipeline using that CSV.
+    """
+    print(f"\n🗓️ Starting full-year pipeline for {year}...")
+
+    df_all = get_ventas_full_year(year)
+    if df_all is None or df_all.empty:
+        print(f"❌ No data fetched for {year}. Aborting pipeline.")
+        return
+
+    combined_path = f"test/ventas/raw/ventas_raw_{year}_full.csv"
+    if not os.path.exists(combined_path):
+        os.makedirs("test/ventas/raw", exist_ok=True)
+        df_all.to_csv(combined_path, index=False)
+
+    print(f"✅ Combined file ready: {combined_path}")
+
+    # Run the standard pipeline but point it to the combined CSV
+    run_full_pipeline(f"{year}-01-01", f"{year}-12-31", raw_override=combined_path)
+
+
 if __name__ == "__main__":
-    # === Optional command-line date arguments ===
-    if len(sys.argv) == 3:
+    # === CLI arguments ===
+    if len(sys.argv) == 2 and sys.argv[1].isdigit():
+        YEAR = int(sys.argv[1])
+        run_full_year_pipeline(YEAR)
+    elif len(sys.argv) == 3:
         DATE_FROM, DATE_TO = sys.argv[1], sys.argv[2]
+        run_full_pipeline(DATE_FROM, DATE_TO)
     else:
         DATE_FROM, DATE_TO = "2024-01-01", "2024-01-31"
         print(f"⚙️ No dates provided — defaulting to {DATE_FROM} → {DATE_TO}")
-
-    run_full_pipeline(DATE_FROM, DATE_TO)
+        run_full_pipeline(DATE_FROM, DATE_TO)
 
 # === END get_ventas_main.py ===

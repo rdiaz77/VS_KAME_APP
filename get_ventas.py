@@ -30,7 +30,7 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
     data = response.json()
 
     # Save raw JSON
-    os.makedirs("test", exist_ok=True)
+    os.makedirs("test/ventas/raw", exist_ok=True)
     json_path = f"test/ventas/raw/ventas_raw_{fecha_desde}_to_{fecha_hasta}.json"
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
@@ -56,5 +56,47 @@ def get_informe_ventas_json(fecha_desde, fecha_hasta, page=1, per_page=100):
 
 if __name__ == "__main__":
     # Example: fetch January 2024 for testing
-    get_informe_ventas_json("2024-01-01", "2024-01-31")
-# === END OF FILE ===
+    get_informe_ventas_json("2024-01-01", "2024-12-31")
+
+# === ADDED: Fetch full year by looping month-by-month ===
+from datetime import datetime, timedelta
+
+
+def get_ventas_full_year(year):
+    """
+    Fetch all sales for a given year by looping monthly (31-day chunks).
+    Keeps existing get_informe_ventas_json() intact.
+    """
+    import pandas as pd
+
+    all_dfs = []
+
+    start = datetime(year, 1, 1)
+    end_of_year = datetime(year, 12, 31)
+
+    while start <= end_of_year:
+        fecha_desde = start.strftime("%Y-%m-%d")
+        fecha_hasta = (start + timedelta(days=30)).strftime("%Y-%m-%d")
+        if datetime.strptime(fecha_hasta, "%Y-%m-%d") > end_of_year:
+            fecha_hasta = end_of_year.strftime("%Y-%m-%d")
+
+        print(f"📅 Fetching chunk {fecha_desde} → {fecha_hasta}")
+        df_chunk = get_informe_ventas_json(fecha_desde, fecha_hasta)
+        if df_chunk is not None and not df_chunk.empty:
+            all_dfs.append(df_chunk)
+
+        start += timedelta(days=31)  # move to next month
+
+    if not all_dfs:
+        print(f"⚠️ No sales data found for {year}.")
+        return None
+
+    df_all = pd.concat(all_dfs, ignore_index=True).drop_duplicates()
+    os.makedirs("test/ventas/raw", exist_ok=True)
+    out_path = f"test/ventas/raw/ventas_raw_{year}_full.csv"
+    df_all.to_csv(out_path, index=False)
+    print(f"✅ Combined all chunks — saved {len(df_all)} rows to {out_path}")
+    return df_all
+
+
+# === END ADDED ===
