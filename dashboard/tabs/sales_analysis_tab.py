@@ -10,19 +10,19 @@ import streamlit as st
 
 from dashboard.tabs.statistics.sales_wheeler_analysis import show_sales_wheeler_analysis
 
+# === PATH SETUP ===
 ROOT_DIR = Path(__file__).resolve().parent.parent.parent  # points to VS_KAME_APP
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))
 
-
 # === Paths ===
-DB_PATH = Path(__file__).parent.parent.parent / "data" / "vitroscience.db"
-PIPELINE_SCRIPT = Path(__file__).parent.parent.parent / "get_ventas_main.py"
+DB_PATH = ROOT_DIR / "data" / "vitroscience.db"
+PIPELINE_SCRIPT = ROOT_DIR / "get_ventas_main.py"
 
 
-# === Fetch Total Sales and Period ===
-def get_total_sales_and_period():
-    """Fetch total sales value and date range from SQLite database."""
+# === Fetch Total Sales and Period (with optional date filter) ===
+def get_total_sales_and_period(start_date=None, end_date=None):
+    """Fetch total sales value and date range from SQLite database, filtered by date."""
     if not DB_PATH.exists():
         st.error(f"❌ Database not found at {DB_PATH}")
         return None, None, None
@@ -34,19 +34,23 @@ def get_total_sales_and_period():
                 SUM(Total) AS total_sales,
                 MIN(Fecha) AS start_date,
                 MAX(Fecha) AS end_date
-            FROM ventas_enriched_product;
+            FROM ventas_enriched_product
         """
-        result = pd.read_sql(query, conn)
+        params = ()
+        if start_date and end_date:
+            query += " WHERE Fecha BETWEEN ? AND ?"
+            params = (start_date, end_date)
+
+        result = pd.read_sql(query, conn, params=params)
         conn.close()
 
         if result.empty:
             return 0.0, None, None
 
         total = float(result["total_sales"].iloc[0] or 0)
-        start_date = result["start_date"].iloc[0]
-        end_date = result["end_date"].iloc[0]
+        start_db = result["start_date"].iloc[0]
+        end_db = result["end_date"].iloc[0]
 
-        # 🔹 Normalize to YYYY-MM-DD (remove time, handle datetime or text)
         def clean_date(value):
             if pd.isna(value):
                 return None
@@ -56,19 +60,16 @@ def get_total_sales_and_period():
                 return value.replace("T", " ").split(" ")[0]
             return str(value)
 
-        start_date = clean_date(start_date)
-        end_date = clean_date(end_date)
-
-        return total, start_date, end_date
+        return total, clean_date(start_db), clean_date(end_db)
 
     except Exception as e:
         st.error(f"Database error: {e}")
         return None, None, None
 
 
-# === Fetch Other Metrics ===
-def get_additional_metrics():
-    """Fetch complementary metrics from the SQLite database."""
+# === Fetch Other Metrics (with same filter) ===
+def get_additional_metrics(start_date=None, end_date=None):
+    """Fetch complementary metrics from the SQLite database (filtered by date)."""
     if not DB_PATH.exists():
         return None, None, None, None, None
 
@@ -76,29 +77,35 @@ def get_additional_metrics():
     metrics = {}
 
     try:
+        date_filter = ""
+        params = ()
+        if start_date and end_date:
+            date_filter = "WHERE Fecha BETWEEN ? AND ?"
+            params = (start_date, end_date)
+
         # --- Total CxC ---
         query_cxc = "SELECT SUM(Saldo) AS total_cxc FROM cuentas_por_cobrar;"
         res_cxc = pd.read_sql(query_cxc, conn)
         metrics["total_cxc"] = float(res_cxc["total_cxc"].iloc[0] or 0)
 
         # --- No. Clientes ---
-        query_clients = (
-            "SELECT COUNT(DISTINCT Rut) AS total_clients FROM ventas_enriched_product;"
-        )
-        res_clients = pd.read_sql(query_clients, conn)
+        query_clients = f"""
+            SELECT COUNT(DISTINCT Rut) AS total_clients 
+            FROM ventas_enriched_product {date_filter};
+        """
+        res_clients = pd.read_sql(query_clients, conn, params=params)
         metrics["no_clients"] = int(res_clients["total_clients"].iloc[0] or 0)
 
-        # --- Gross Revenue (MargenContrib) ---
-        query_gross = (
-            "SELECT SUM(MargenContrib) AS gross_rev FROM ventas_enriched_product;"
-        )
-        res_gross = pd.read_sql(query_gross, conn)
+        # --- Gross Revenue ---
+        query_gross = f"""
+            SELECT SUM(MargenContrib) AS gross_rev 
+            FROM ventas_enriched_product {date_filter};
+        """
+        res_gross = pd.read_sql(query_gross, conn, params=params)
         metrics["gross_rev"] = float(res_gross["gross_rev"].iloc[0] or 0)
 
-        # --- Clientes Nuevos (simplified placeholder logic) ---
+        # --- Placeholder fields ---
         metrics["new_clients"] = metrics["no_clients"]
-
-        # --- C. de trabajo (placeholder) ---
         metrics["working_capital"] = None
 
     except Exception as e:
@@ -118,67 +125,70 @@ def get_additional_metrics():
 
 # === Show Sales Analysis Tab ===
 def show_sales_analysis():
-    """Display the Sales Analysis tab with 3-column KPI grid and manual update."""
+    """Display the Sales Analysis tab with current-year default and custom date selector."""
     st.header("📊 Sales Analysis")
+
+    # --- Default period: current year ---
+    today = datetime.today()
+    default_start = datetime(today.year, 1, 1)
+    default_end = today
+
+    # Persist in session state
+    if "sales_start" not in st.session_state:
+        st.session_state.sales_start = default_start
+    if "sales_end" not in st.session_state:
+        st.session_state.sales_end = default_end
+
+    # --- Date selector ---
+    with st.expander("📅 Select Date Range", expanded=True):
+        c1, c2 = st.columns(2)
+        with c1:
+            start_date = st.date_input(
+                "Start Date", value=st.session_state.sales_start
+            )
+        with c2:
+            end_date = st.date_input(
+                "End Date", value=st.session_state.sales_end
+            )
+
+        # Update globally
+        st.session_state.sales_start = start_date
+        st.session_state.sales_end = end_date
+
+    start_str = start_date.strftime("%Y-%m-%d")
+    end_str = end_date.strftime("%Y-%m-%d")
 
     # --- MAIN KPI GRID ---
     col1, col2, col3 = st.columns(3)
 
-    # === COLUMN 1 ===
     with col1:
         st.subheader("💰 Total Sales (KAME)")
-        total_sales, start_date, end_date = get_total_sales_and_period()
+        total_sales, start_db, end_db = get_total_sales_and_period(start_str, end_str)
         total_cxc, no_clients, gross_rev, working_capital, new_clients = (
-            get_additional_metrics()
+            get_additional_metrics(start_str, end_str)
         )
 
         if total_sales is not None:
-            if start_date and end_date:
-                period_text = f"{start_date} → {end_date}"
-            else:
-                period_text = "N/A"
             st.metric(
-                label=f"Total Sales\n({period_text})", value=f"${total_sales:,.0f}"
+                label=f"Total Sales\n({start_str} → {end_str})",
+                value=f"${total_sales:,.0f}",
             )
         else:
             st.metric(label="Total Sales", value="—")
 
-        if gross_rev is not None:
-            st.metric(label="Gross Revenue", value=f"${gross_rev:,.0f}")
-        else:
-            st.metric(label="Gross Revenue", value="—")
-
-        # Placeholder row
+        st.metric(label="Gross Revenue", value=f"${gross_rev:,.0f}" if gross_rev else "—")
         st.metric(label="—", value="—")
 
-    # === COLUMN 2 ===
     with col2:
-        if total_cxc is not None:
-            st.metric(label="Total CxC", value=f"${total_cxc:,.0f}")
-        else:
-            st.metric(label="Total CxC", value="—")
-
-        if working_capital is not None:
-            st.metric(label="C. de trabajo", value=f"${working_capital:,.0f}")
-        else:
-            st.metric(label="C. de trabajo", value="—")
-
-        # Placeholder row
+        st.metric(label="Total CxC", value=f"${total_cxc:,.0f}" if total_cxc else "—")
+        st.metric(label="C. de trabajo", value=f"${working_capital:,.0f}" if working_capital else "—")
         st.metric(label="No. Deudores", value="—")
 
-    # === COLUMN 3 ===
     with col3:
-        if no_clients is not None:
-            st.metric(label="No. Clientes", value=f"{no_clients:,}")
-        else:
-            st.metric(label="No. Clientes", value="—")
+        st.metric(label="No. Clientes", value=f"{no_clients:,}" if no_clients else "—")
+        st.metric(label="Clientes Nuevos", value=f"{new_clients:,}" if new_clients else "—")
 
-        if new_clients is not None:
-            st.metric(label="Clientes Nuevos", value=f"{new_clients:,}")
-        else:
-            st.metric(label="Clientes Nuevos", value="—")
-
-        # Inject CSS for small modern button
+        # CSS + Button
         st.markdown(
             """
             <style>
@@ -193,14 +203,12 @@ def show_sales_analysis():
             }
             div.stButton > button.small-button:hover {
                 background-color: #0b5ed7;
-                color: white;
             }
             </style>
             """,
             unsafe_allow_html=True,
         )
 
-        # Update Button
         run_update = st.button("Run Sales Pipeline", key="update_btn")
         if run_update:
             if not PIPELINE_SCRIPT.exists():
@@ -224,16 +232,12 @@ def show_sales_analysis():
 
     st.markdown("---")
     st.info(
-        "💡 This section shows key performance metrics from the VitroScience database "
-        "and allows you to manually trigger the sales update pipeline."
+        "💡 By default, this view shows data from the current year. You can select any date range to update all metrics and charts dynamically."
     )
 
-    # === Donald J. Wheeler Statistical Section ===
     st.markdown("---")
     st.subheader("📊 Statistical Wheeler Analysis")
 
-    # Display Wheeler charts from the external module
+    # Display Wheeler charts (same global period)
     show_sales_wheeler_analysis()
-
-
-# End of file dashboard/tabs/sales_analysis_tab.py
+# === End of dashboard/tabs/sales_analysis_tab.py ===
