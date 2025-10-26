@@ -17,6 +17,8 @@ from dashboard.cta_por_cobrar_view import show_cta_cobrar
 from dashboard.cta_por_pagar_view import show_cta_pagar
 from dashboard.inventario_view import show_inventario
 from dashboard.settings_view import show_settings
+from dashboard.ventas import show_ventas
+
 
 
 st.set_page_config(page_title="VitroScience Dashboard", layout="wide")
@@ -37,6 +39,8 @@ page = st.sidebar.radio(
 
 if page == "🏠 Scorecard":
     show_scorecard()
+elif page == "💰 Ventas":
+    show_ventas()
 elif page == "👥 Clientes":
     show_clientes()
 elif page == "📦 Inventario":
