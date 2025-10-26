@@ -1,7 +1,7 @@
 # === pipeline/clean_sales_main.py ===
 import os
-
 import pandas as pd
+from unidecode import unidecode
 
 
 def run_clean_sales_pipeline(source_path: str = None):
@@ -10,6 +10,7 @@ def run_clean_sales_pipeline(source_path: str = None):
     - Drops only the specified unnecessary columns (keeping Rut)
     - Rounds numeric values (keeps them as numeric types)
     - Normalizes text columns: RznSocial, Direccion, Comuna, Ciudad, Region, ServicioSalud
+    - Removes accents from several key text fields
     - Converts Folio to text and removes trailing '.0'
     - Saves output to /test/ventas/clean/ventas_clean_preview.csv
     """
@@ -18,7 +19,6 @@ def run_clean_sales_pipeline(source_path: str = None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
 
     if source_path is None:
-        # Prefer the full-year combined file if it exists
         candidate_full = os.path.join(base_dir, "../test/ventas/raw/ventas_raw.csv")
         candidate_fallback = os.path.join(
             base_dir, "../test/ventas/raw/ventas_raw_2024-01-01_to_2024-01-31.csv"
@@ -87,6 +87,30 @@ def run_clean_sales_pipeline(source_path: str = None):
         if col in df.columns:
             df[col] = df[col].astype(str).str.strip().str.lower().str.title()
 
+    # === Remove accents from specified columns ===
+    accent_cols = [
+        "RznSocial",
+        "NombreDocumento",
+        "Direccion",
+        "Comuna",
+        "Ciudad",
+        "DescripcionDetallada",
+        "Comentario",
+        "NombreRef1",
+        "RazonRef1",
+        "NombreRef2",
+        "FechaRef2",
+        "FolioRef2",
+        "RazonRef2",
+        "NombreRef3",
+        "FechaRef3",
+        "FolioRef3",
+        "RazonRef3",
+    ]
+    for col in accent_cols:
+        if col in df.columns:
+            df[col] = df[col].astype(str).apply(lambda x: unidecode(x))
+
     # === Convert Folio to text and remove trailing ".0" ===
     if "Folio" in df.columns:
         df["Folio"] = (
@@ -101,9 +125,7 @@ def run_clean_sales_pipeline(source_path: str = None):
     df.to_csv(output_path, index=False)
 
     print(f"💾 Saved cleaned file to {output_path}")
-    print("✅ Numeric columns remain numeric (no thousand separators applied).")
-
-    # Debug: show remaining columns
+    print("✅ Accents removed and numeric columns remain numeric.")
     print("🧾 Columns after cleaning:")
     print(df.columns.tolist())
 
