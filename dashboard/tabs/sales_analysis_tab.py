@@ -2,7 +2,8 @@
 import sqlite3
 import subprocess
 import sys
-from datetime import datetime
+from calendar import monthrange
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
@@ -19,176 +20,251 @@ if str(ROOT_DIR) not in sys.path:
 DB_PATH = ROOT_DIR / "data" / "vitroscience.db"
 PIPELINE_SCRIPT = ROOT_DIR / "get_ventas_main.py"
 
+# === Constants ===
+MIN_ALLOWED_DATE = pd.Timestamp("2023-01-01")
 
-# === Fetch Total Sales and Period (with optional date filter) ===
-def get_total_sales_and_period(start_date=None, end_date=None):
-    """Fetch total sales value and date range from SQLite database, filtered by date."""
+
+# === Helpers ===
+def _safe_same_day_last_year(ts: pd.Timestamp) -> pd.Timestamp:
+    """
+    Return the same calendar day one year earlier.
+    Handles Feb 29 -> Feb 28 fallback in non-leap years.
+    """
+    try:
+        return ts - pd.DateOffset(years=1)
+    except Exception:
+        # As a fallback, clamp to Feb 28 if necessary
+        if ts.month == 2 and ts.day == 29:
+            return pd.Timestamp(ts.year - 1, 2, 28)
+        # Generic fallback: subtract 365 days (approx)
+        return ts - pd.Timedelta(days=365)
+
+
+def _period_for_selection(
+    year: int, month_opt: str | None
+) -> tuple[pd.Timestamp, pd.Timestamp, str]:
+    """
+    Compute start/end dates and a human label for the selected year/month.
+    - If month_opt == "All": full year for past years; YTD for current year.
+    - If month is a number name like "March": that month's period.
+    """
+    today = pd.Timestamp(date.today())
+    is_current_year = year == today.year
+
+    if month_opt == "All":
+        start = pd.Timestamp(year, 1, 1)
+        if is_current_year:
+            end = today
+            label = f"YTD {year}"
+        else:
+            end = pd.Timestamp(year, 12, 31)
+            label = f"Full Year {year}"
+        return start, end, label
+
+    # Specific month
+    month_idx = MONTH_NAME_TO_NUM[month_opt]
+    start = pd.Timestamp(year, month_idx, 1)
+    last_day = monthrange(year, month_idx)[1]
+    end_candidate = pd.Timestamp(year, month_idx, last_day)
+
+    if is_current_year and month_idx == today.month:
+        # Current month -> MTD
+        end = today
+        label = f"{month_opt} {year} (MTD)"
+    else:
+        end = end_candidate
+        label = f"{month_opt} {year}"
+
+    return start, end, label
+
+
+def _previous_period_for_comparison(
+    start: pd.Timestamp, end: pd.Timestamp, label: str
+) -> tuple[pd.Timestamp | None, pd.Timestamp | None, str]:
+    """
+    Build the previous-year comparison period:
+    - For YTD: previous YTD up to same calendar day last year.
+    - For full year: previous full year.
+    - For a month: same month previous year.
+    Returns (prev_start, prev_end, compare_label). May return (None, None, "—") if invalid (<2023).
+    """
+    # Detect type by label
+    if label.startswith("YTD "):
+        year = int(label.split(" ")[1])
+        prev_year = year - 1
+        prev_start = pd.Timestamp(prev_year, 1, 1)
+        prev_end = _safe_same_day_last_year(pd.Timestamp(date.today()))
+        compare_label = f"vs YTD {prev_year}"
+    elif label.startswith("Full Year "):
+        year = int(label.split(" ")[2])
+        prev_year = year - 1
+        prev_start = pd.Timestamp(prev_year, 1, 1)
+        prev_end = pd.Timestamp(prev_year, 12, 31)
+        compare_label = f"vs Full Year {prev_year}"
+    else:
+        # "<Month> <Year>" or "(MTD)"
+        # Extract month and year
+        base = label.replace(" (MTD)", "")
+        month_name, year_str = base.split(" ")
+        year = int(year_str)
+        prev_year = year - 1
+        month_idx = MONTH_NAME_TO_NUM[month_name]
+        prev_start = pd.Timestamp(prev_year, month_idx, 1)
+        prev_end = pd.Timestamp(
+            prev_year, month_idx, monthrange(prev_year, month_idx)[1]
+        )
+        compare_label = f"vs {month_name} {prev_year}"
+
+    # Enforce minimum allowed date
+    if prev_end < MIN_ALLOWED_DATE:
+        return None, None, "—"
+    if prev_start < MIN_ALLOWED_DATE:
+        prev_start = MIN_ALLOWED_DATE
+
+    return prev_start, prev_end, compare_label
+
+
+def _query_total(
+    conn: sqlite3.Connection, start: pd.Timestamp, end: pd.Timestamp
+) -> float:
+    """
+    Query SUM(Total) in ventas_enriched_product for [start, end], enforcing MIN_ALLOWED_DATE.
+    """
+    # Enforce lower bound in the query and parameters
+    effective_start = max(start, MIN_ALLOWED_DATE)
+    if end < effective_start:
+        return 0.0
+
+    q = """
+        SELECT SUM(Total) AS total_sales
+        FROM ventas_enriched_product
+        WHERE DATE(Fecha) BETWEEN DATE(?) AND DATE(?)
+          AND DATE(Fecha) >= DATE(?)
+    """
+    df = pd.read_sql(
+        q,
+        conn,
+        params=(
+            effective_start.strftime("%Y-%m-%d"),
+            end.strftime("%Y-%m-%d"),
+            MIN_ALLOWED_DATE.strftime("%Y-%m-%d"),
+        ),
+    )
+    val = df["total_sales"].iloc[0]
+    return float(val) if pd.notna(val) else 0.0
+
+
+def _format_currency(n: float) -> str:
+    return f"${n:,.0f}"
+
+
+def _format_delta(curr: float, prev: float) -> str:
+    if prev and prev > 0:
+        pct = (curr - prev) / prev * 100.0
+        sign = "+" if pct >= 0 else ""
+        return f"{sign}{pct:.1f}%"
+    return "—"
+
+
+# Month helpers
+MONTHS = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+]
+MONTH_NAME_TO_NUM = {name: i + 1 for i, name in enumerate(MONTHS)}
+
+
+# === Main UI ===
+def show_sales_analysis():
+    """Sales Analysis tab with Year/Month selector, defaulting to current YTD, with YoY comparison."""
+    st.header("📊 Sales Analysis")
+
+    # --- DB existence check ---
     if not DB_PATH.exists():
         st.error(f"❌ Database not found at {DB_PATH}")
-        return None, None, None
+        return
 
+    # --- Defaults ---
+    today = pd.Timestamp(date.today())
+    current_year = today.year
+
+    # --- Selectors ---
+    # --- Period selector area (1/4 width) ---
+    c1, c2, c3, c4 = st.columns([1, 1, 0.1, 0.1])  # first column ≈ ¼ width
+    with c1:
+        with st.expander("📅 Select Period", expanded=True):
+            col_year, col_month = st.columns([1, 1])  # same row: year + month
+            with col_year:
+                years = list(range(2023, current_year + 1))
+                year = st.selectbox("Year", years, index=len(years) - 1)
+            with col_month:
+                month_choices = ["All"] + MONTHS
+                month_choice = st.selectbox("Month", month_choices, index=0)
+
+
+    # --- Compute periods ---
+    sel_start, sel_end, sel_label = _period_for_selection(year, month_choice)
+
+    prev_start, prev_end, compare_label = _previous_period_for_comparison(
+        sel_start, sel_end, sel_label
+    )
+
+    # --- Query totals ---
     try:
         conn = sqlite3.connect(DB_PATH)
-        query = """
-            SELECT 
-                SUM(Total) AS total_sales,
-                MIN(Fecha) AS start_date,
-                MAX(Fecha) AS end_date
-            FROM ventas_enriched_product
-        """
-        params = ()
-        if start_date and end_date:
-            query += " WHERE Fecha BETWEEN ? AND ?"
-            params = (start_date, end_date)
 
-        result = pd.read_sql(query, conn, params=params)
-        conn.close()
+        curr_total = _query_total(conn, sel_start, sel_end)
 
-        if result.empty:
-            return 0.0, None, None
-
-        total = float(result["total_sales"].iloc[0] or 0)
-        start_db = result["start_date"].iloc[0]
-        end_db = result["end_date"].iloc[0]
-
-        def clean_date(value):
-            if pd.isna(value):
-                return None
-            if isinstance(value, (datetime, pd.Timestamp)):
-                return value.strftime("%Y-%m-%d")
-            if isinstance(value, str):
-                return value.replace("T", " ").split(" ")[0]
-            return str(value)
-
-        return total, clean_date(start_db), clean_date(end_db)
+        if prev_start is not None and prev_end is not None:
+            prev_total = _query_total(conn, prev_start, prev_end)
+        else:
+            prev_total = None
 
     except Exception as e:
         st.error(f"Database error: {e}")
-        return None, None, None
-
-
-# === Fetch Other Metrics (with same filter) ===
-def get_additional_metrics(start_date=None, end_date=None):
-    """Fetch complementary metrics from the SQLite database (filtered by date)."""
-    if not DB_PATH.exists():
-        return None, None, None, None, None
-
-    conn = sqlite3.connect(DB_PATH)
-    metrics = {}
-
-    try:
-        date_filter = ""
-        params = ()
-        if start_date and end_date:
-            date_filter = "WHERE Fecha BETWEEN ? AND ?"
-            params = (start_date, end_date)
-
-        # --- Total CxC ---
-        query_cxc = "SELECT SUM(Saldo) AS total_cxc FROM cuentas_por_cobrar;"
-        res_cxc = pd.read_sql(query_cxc, conn)
-        metrics["total_cxc"] = float(res_cxc["total_cxc"].iloc[0] or 0)
-
-        # --- No. Clientes ---
-        query_clients = f"""
-            SELECT COUNT(DISTINCT Rut) AS total_clients 
-            FROM ventas_enriched_product {date_filter};
-        """
-        res_clients = pd.read_sql(query_clients, conn, params=params)
-        metrics["no_clients"] = int(res_clients["total_clients"].iloc[0] or 0)
-
-        # --- Gross Revenue ---
-        query_gross = f"""
-            SELECT SUM(MargenContrib) AS gross_rev 
-            FROM ventas_enriched_product {date_filter};
-        """
-        res_gross = pd.read_sql(query_gross, conn, params=params)
-        metrics["gross_rev"] = float(res_gross["gross_rev"].iloc[0] or 0)
-
-        # --- Placeholder fields ---
-        metrics["new_clients"] = metrics["no_clients"]
-        metrics["working_capital"] = None
-
-    except Exception as e:
-        st.error(f"Error fetching metrics: {e}")
-        return None, None, None, None, None
+        return
     finally:
-        conn.close()
+        try:
+            conn.close()
+        except Exception:
+            pass
 
-    return (
-        metrics["total_cxc"],
-        metrics["no_clients"],
-        metrics["gross_rev"],
-        metrics["working_capital"],
-        metrics["new_clients"],
-    )
-
-
-# === Show Sales Analysis Tab ===
-def show_sales_analysis():
-    """Display the Sales Analysis tab with current-year default and custom date selector."""
-    st.header("📊 Sales Analysis")
-
-    # --- Default period: current year ---
-    today = datetime.today()
-    default_start = datetime(today.year, 1, 1)
-    default_end = today
-
-    # Persist in session state
-    if "sales_start" not in st.session_state:
-        st.session_state.sales_start = default_start
-    if "sales_end" not in st.session_state:
-        st.session_state.sales_end = default_end
-
-    # --- Date selector ---
-    with st.expander("📅 Select Date Range", expanded=True):
-        c1, c2 = st.columns(2)
-        with c1:
-            start_date = st.date_input(
-                "Start Date", value=st.session_state.sales_start
-            )
-        with c2:
-            end_date = st.date_input(
-                "End Date", value=st.session_state.sales_end
-            )
-
-        # Update globally
-        st.session_state.sales_start = start_date
-        st.session_state.sales_end = end_date
-
-    start_str = start_date.strftime("%Y-%m-%d")
-    end_str = end_date.strftime("%Y-%m-%d")
-
-    # --- MAIN KPI GRID ---
-    col1, col2, col3 = st.columns(3)
+    # --- KPI ---
+    col1, col2 = st.columns([1, 1])
 
     with col1:
-        st.subheader("💰 Total Sales (KAME)")
-        total_sales, start_db, end_db = get_total_sales_and_period(start_str, end_str)
-        total_cxc, no_clients, gross_rev, working_capital, new_clients = (
-            get_additional_metrics(start_str, end_str)
+        st.subheader("💰 Total Sales")
+        delta_str = (
+            _format_delta(curr_total, prev_total) if prev_total is not None else "—"
+        )
+        # Include compare label in help text below the metric
+        st.metric(
+            label=f"{sel_label}",
+            value=_format_currency(curr_total),
+            delta=f"{delta_str} {compare_label if prev_total is not None else ''}".strip(),
         )
 
-        if total_sales is not None:
-            st.metric(
-                label=f"Total Sales\n({start_str} → {end_str})",
-                value=f"${total_sales:,.0f}",
+        # Period text
+        st.caption(
+            f"Period: {sel_start.strftime('%Y-%m-%d')} → {sel_end.strftime('%Y-%m-%d')} (no data before {MIN_ALLOWED_DATE.date()})"
+        )
+        if prev_total is not None:
+            st.caption(
+                f"Comparison: {prev_start.strftime('%Y-%m-%d')} → {prev_end.strftime('%Y-%m-%d')}"
             )
-        else:
-            st.metric(label="Total Sales", value="—")
-
-        st.metric(label="Gross Revenue", value=f"${gross_rev:,.0f}" if gross_rev else "—")
-        st.metric(label="—", value="—")
 
     with col2:
-        st.metric(label="Total CxC", value=f"${total_cxc:,.0f}" if total_cxc else "—")
-        st.metric(label="C. de trabajo", value=f"${working_capital:,.0f}" if working_capital else "—")
-        st.metric(label="No. Deudores", value="—")
-
-    with col3:
-        st.metric(label="No. Clientes", value=f"{no_clients:,}" if no_clients else "—")
-        st.metric(label="Clientes Nuevos", value=f"{new_clients:,}" if new_clients else "—")
-
-        # CSS + Button
+        # Styled button
         st.markdown(
             """
             <style>
@@ -232,12 +308,16 @@ def show_sales_analysis():
 
     st.markdown("---")
     st.info(
-        "💡 By default, this view shows data from the current year. You can select any date range to update all metrics and charts dynamically."
+        "💡 Default view shows the current year's YTD. "
+        "Select a year and optionally a month to view totals for that period. "
+        "Past years: 'All' = full year. Current year: 'All' = YTD. "
+        "Comparisons are vs the same period in the previous year."
     )
 
     st.markdown("---")
     st.subheader("📊 Statistical Wheeler Analysis")
-
-    # Display Wheeler charts (same global period)
+    # Unchanged: relies on its own internal logic / data scope
     show_sales_wheeler_analysis()
+
+
 # === End of dashboard/tabs/sales_analysis_tab.py ===
