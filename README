@@ -3,3 +3,192 @@
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+## ⚙️ Setup & Deployment
+
+This section describes how to install and configure the VitroScience sales data pipeline for production use on macOS (or any Unix-like environment).  
+Once installed, the system automatically keeps your database (`data/vitroscience.db`) updated every 2 hours and sends a daily summary notification.
+
+---
+
+### 🧱 1. Environment Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/your-repo/VS_KAME_APP.git
+   cd VS_KAME_APP
+   ```
+
+2. **Create and activate a virtual environment**
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
+
+3. **Install dependencies**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. **Verify database structure**
+   Make sure this directory structure exists:
+   ```
+   VS_KAME_APP/
+   ├── data/
+   ├── pipeline/
+   ├── test/ventas/raw/
+   ├── test/ventas/clean/
+   ├── view_db.py
+   ├── get_ventas_incremental.py
+   ├── get_ventas_full_backfill.py
+   └── daily_summary_notify.py
+   ```
+
+5. **Run the initial backfill**
+   Populate the database with all ventas since 2023:
+   ```bash
+   python get_ventas_full_backfill.py
+   ```
+
+---
+
+### ⏱️ 2. Enable Automatic 2-Hour Incremental Updates
+
+Once your database is initialized, schedule `get_ventas_incremental.py` to run every 2 hours.
+
+#### 🧩 macOS LaunchAgent setup
+
+1. Create the LaunchAgent file:
+   ```bash
+   nano ~/Library/LaunchAgents/com.vitroscience.autoupdate.plist
+   ```
+
+2. Paste this configuration:
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+     <dict>
+       <key>Label</key>
+       <string>com.vitroscience.autoupdate</string>
+       <key>ProgramArguments</key>
+       <array>
+         <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/.venv/bin/python</string>
+         <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/get_ventas_incremental.py</string>
+       </array>
+       <key>WorkingDirectory</key>
+       <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP</string>
+       <key>StandardOutPath</key>
+       <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/data/update_log.txt</string>
+       <key>StandardErrorPath</key>
+       <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/data/update_log.txt</string>
+       <key>StartInterval</key>
+       <integer>7200</integer>
+       <key>RunAtLoad</key>
+       <true/>
+     </dict>
+   </plist>
+   ```
+
+3. Load and start the agent:
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.vitroscience.autoupdate.plist
+   launchctl start com.vitroscience.autoupdate
+   ```
+
+4. Confirm it’s active:
+   ```bash
+   launchctl list | grep vitroscience
+   ```
+
+✅ The updater now runs every 2 hours automatically, even if you log out.
+
+---
+
+### 🔔 3. Enable Daily macOS Summary Notification (7 PM)
+
+1. Create another LaunchAgent:
+   ```bash
+   nano ~/Library/LaunchAgents/com.vitroscience.dailynotify.plist
+   ```
+
+2. Paste this configuration:
+
+   ```xml
+   <?xml version="1.0" encoding="UTF-8"?>
+   <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+   <plist version="1.0">
+     <dict>
+       <key>Label</key>
+       <string>com.vitroscience.dailynotify</string>
+       <key>ProgramArguments</key>
+       <array>
+         <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/.venv/bin/python</string>
+         <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/daily_summary_notify.py</string>
+       </array>
+       <key>WorkingDirectory</key>
+       <string>/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP</string>
+       <key>StartCalendarInterval</key>
+       <dict>
+         <key>Hour</key><integer>19</integer>
+         <key>Minute</key><integer>0</integer>
+       </dict>
+       <key>RunAtLoad</key>
+       <false/>
+     </dict>
+   </plist>
+   ```
+
+3. Load and enable:
+   ```bash
+   launchctl load ~/Library/LaunchAgents/com.vitroscience.dailynotify.plist
+   ```
+
+At 7 PM each day, you’ll see a macOS notification like:  
+> ✅ 28 new ventas in the last 24 hours!  
+
+and the count will be logged in:
+```
+data/daily_summary_log.csv
+```
+
+---
+
+### 🪵 4. Logs and Monitoring
+
+| File | Purpose |
+|------|----------|
+| `data/update_log.txt` | Timestamp of each incremental updater run |
+| `data/daily_summary_log.csv` | Daily count of ventas added in last 24 h |
+| `data/vitroscience.db` | Live SQLite database used by the Streamlit dashboard |
+
+To monitor logs in real time:
+```bash
+tail -f data/update_log.txt
+```
+
+---
+
+### 🧪 5. Streamlit Dashboard
+
+To explore your data:
+```bash
+streamlit run view_db.py
+```
+
+Features:
+- View all tables in the database  
+- Preview latest records (sorted by `Fecha`)  
+- Download full tables or query results as CSV  
+- Run custom SQL queries directly in the browser  
+
+---
+
+### ✅ Summary of Automation
+
+| Task | Script | Frequency | Trigger |
+|------|---------|------------|----------|
+| Full Backfill (init) | `get_ventas_full_backfill.py` | One-time | Manual |
+| Incremental Updates | `get_ventas_incremental.py` | Every 2 hours | LaunchAgent |
+| Daily Summary Notification | `daily_summary_notify.py` | Daily at 7 PM | LaunchAgent |
+| DB Viewer | `view_db.py` | On demand | Manual (Streamlit) |
