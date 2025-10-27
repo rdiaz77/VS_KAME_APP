@@ -28,12 +28,15 @@ import pandas as pd
 from get_ventas import get_informe_ventas_json, get_ventas_full_year
 
 # === Import pipeline components (original working flow) ===
+from get_ventas import get_informe_ventas_json, get_ventas_full_year
+
 from pipeline import (
     add_location_info,
     add_product_info,
     run_clean_sales_pipeline,
-    save_to_sqlite,
 )
+from pipeline.save_to_sqlite import save_to_sqlite
+
 
 
 def run_full_pipeline(

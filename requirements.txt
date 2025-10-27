@@ -26,3 +26,4 @@ rich>=13.7.0             # Optional: better logging display
 # === Optional (development helpers) ===
 bandit>=1.7.5            # Security linter
 black>=24.4.2            # Code formatter
+unidecode-1.4.0          # Text normalization

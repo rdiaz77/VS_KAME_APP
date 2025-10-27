@@ -1,0 +1,10 @@
+Traceback (most recent call last):
+  File "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/get_ventas_incremental.py", line 14, in <module>
+    from pipeline import (
+    ...<4 lines>...
+    )
+  File "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/pipeline/__init__.py", line 10, in <module>
+    from .clean_sales_main import run_clean_sales_pipeline
+  File "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/pipeline/clean_sales_main.py", line 4, in <module>
+    from unidecode import unidecode
+ModuleNotFoundError: No module named 'unidecode'
