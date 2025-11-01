@@ -1,44 +1,111 @@
 # === dashboard/tabs/statistics/clients_wheeler_analysis.py ===
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 import streamlit as st
 
 
-def show_clients_wheeler_analysis(df_ytd, df_selected):
-    """Display Wheeler-style monthly comparison (YTD vs selected period)."""
-    if df_ytd.empty:
-        st.info("No data available for this client.")
+# === Helper: generic Wheeler chart ===
+def wheeler_chart(df, value_col, title):
+    """Plot Wheeler process behavior chart and moving range chart side-by-side."""
+    if df.empty or value_col not in df.columns:
+        st.warning(f"No data for {title}")
         return
 
-    # Group monthly totals
-    def group(df):
-        df["Month"] = df["Fecha"].dt.to_period("M")
-        return df.groupby("Month").agg({"Total": "sum", "Folio": "nunique"}).reset_index()
+    values = df[value_col].astype(float).tolist()
+    if len(values) < 3:
+        st.info(f"Not enough data to plot {title}")
+        return
 
-    df_ytd_m = group(df_ytd)
-    df_selected_m = group(df_selected) if not df_selected.empty else pd.DataFrame(columns=["Month", "Total", "Folio"])
+    mean = np.mean(values)
+    moving_ranges = [abs(values[i] - values[i - 1]) for i in range(1, len(values))]
+    mr_bar = np.mean(moving_ranges)
+    lpl = mean - 2.66 * mr_bar
+    upl = mean + 2.66 * mr_bar
 
-    # === Plot ===
-    fig, ax1 = plt.subplots(figsize=(8, 4))
-    ax2 = ax1.twinx()
+    range_dates = df["Fecha"].iloc[1:]
+    mr_mean = mr_bar
+    mr_ucl = 3.268 * mr_mean  # Wheeler constant
 
-    # Bars for YTD and selected
-    ax1.bar(df_ytd_m["Month"].astype(str), df_ytd_m["Total"], alpha=0.3, label="YTD")
-    if not df_selected_m.empty:
-        ax1.bar(df_selected_m["Month"].astype(str), df_selected_m["Total"], alpha=0.7, label="Selected Period")
+    col1, col2 = st.columns(2, gap="large")
 
-    # Invoices line (YTD)
-    ax2.plot(df_ytd_m["Month"].astype(str), df_ytd_m["Folio"], color="gray", marker="o", label="Facturas (YTD)")
-    if not df_selected_m.empty:
-        ax2.plot(df_selected_m["Month"].astype(str), df_selected_m["Folio"], color="tab:blue", marker="o", label="Facturas (Selected)")
+    # === Process Behavior Chart ===
+    with col1:
+        fig, ax = plt.subplots(figsize=(6, 4))
+        ax.plot(df["Fecha"], values, marker="o", label=value_col, color="tab:blue")
+        ax.axhline(mean, color="blue", linestyle="--", label="Mean")
+        ax.axhline(upl, color="red", linestyle="--", label="Upper Limit")
+        ax.axhline(lpl, color="red", linestyle="--", label="Lower Limit")
+        ax.fill_between(df["Fecha"], lpl, upl, color="red", alpha=0.1)
+        ax.set_title(f"{title}\n(Process Behavior Chart)")
+        ax.legend()
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        st.pyplot(fig)
 
-    ax1.set_title("📊 Monthly Sales & Invoices — Selected vs YTD", fontsize=11)
-    ax1.set_xlabel("Month")
-    ax1.set_ylabel("Sales Amount")
-    ax2.set_ylabel("Number of Invoices")
-    ax1.legend(loc="upper left")
-    ax2.legend(loc="upper right")
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    st.pyplot(fig)
+    # === Moving Range Chart ===
+    with col2:
+        fig2, ax2 = plt.subplots(figsize=(6, 4))
+        ax2.plot(
+            range_dates, moving_ranges, marker="o", color="purple", label="Moving Range"
+        )
+        ax2.axhline(mr_mean, color="blue", linestyle="--", label="MR Mean")
+        ax2.axhline(mr_ucl, color="red", linestyle="--", label="MR Upper Limit")
+        ax2.fill_between(range_dates, mr_mean, mr_ucl, color="red", alpha=0.1)
+        ax2.set_title(f"{title}\n(Moving Range Chart)")
+        ax2.legend()
+        plt.xticks(rotation=45, ha="right")
+        plt.tight_layout()
+        st.pyplot(fig2)
+
+
+# === 💰 Sales (Ventas) Wheeler Chart ===
+def show_sales_wheeler_analysis(df_ytd, df_selected):
+    """
+    Wheeler analysis for Ventas:
+    - Combines YTD + selected period
+    - Shows Total sales per month with Wheeler limits
+    """
+    if df_ytd.empty:
+        st.warning("No YTD sales data available.")
+        return
+
+    # Combine YTD + selected period if provided
+    df = df_ytd.copy()
+    if not df_selected.empty:
+        df = pd.concat([df_ytd, df_selected])
+
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    df = df.dropna(subset=["Fecha"])
+    df = df.groupby(df["Fecha"].dt.to_period("M")).agg({"Total": "sum"}).reset_index()
+    df["Fecha"] = df["Fecha"].dt.to_timestamp()
+
+    st.subheader("💰 Ventas — Wheeler Analysis")
+    wheeler_chart(df, "Total", "Monthly Total Sales")
+
+
+# === 💳 Cuentas por Cobrar Wheeler Chart ===
+def show_cta_por_cobrar_wheeler_analysis(df_ytd, df_selected):
+    """
+    Wheeler analysis for Cuentas por Cobrar:
+    - Combines YTD + selected period
+    - Shows Saldo per month with Wheeler limits
+    """
+    if df_ytd.empty:
+        st.warning("No YTD Cuentas por Cobrar data available.")
+        return
+
+    df = df_ytd.copy()
+    if not df_selected.empty:
+        df = pd.concat([df_ytd, df_selected])
+
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    df = df.dropna(subset=["Fecha"])
+    df = df.groupby(df["Fecha"].dt.to_period("M")).agg({"Saldo": "sum"}).reset_index()
+    df["Fecha"] = df["Fecha"].dt.to_timestamp()
+
+    st.subheader("💳 Cuentas por Cobrar — Wheeler Analysis")
+    wheeler_chart(df, "Saldo", "Monthly Outstanding Balance")
+
+
 # === END dashboard/tabs/statistics/clients_wheeler_analysis.py ===

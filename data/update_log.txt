@@ -368,3 +368,13 @@ Traceback (most recent call last):
     start_date = last_date + datetime.timedelta(days=1)
                              ^^^^^^^^
 UnboundLocalError: cannot access local variable 'datetime' where it is not associated with a value
+🚀 Starting incremental ventas update...
+
+Traceback (most recent call last):
+  File "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/get_ventas_incremental.py", line 82, in <module>
+    run_incremental_update()
+    ~~~~~~~~~~~~~~~~~~~~~~^^
+  File "/Users/rafaeldiaz/Desktop/Python_Kame_ERP/VS_KAME_APP/get_ventas_incremental.py", line 38, in run_incremental_update
+    start_date = last_date + datetime.timedelta(days=1)
+                             ^^^^^^^^
+UnboundLocalError: cannot access local variable 'datetime' where it is not associated with a value

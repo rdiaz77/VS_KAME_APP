@@ -14,8 +14,14 @@ if str(ROOT_DIR) not in sys.path:
 
 DB_PATH = ROOT_DIR / "data" / "vitroscience.db"
 
-# === Import Wheeler chart ===
-from dashboard.tabs.statistics.clients_wheeler_analysis import show_clients_wheeler_analysis
+# === Import Wheeler charts ===
+from dashboard.tabs.statistics.clients_wheeler_analysis import (
+    show_cta_por_cobrar_wheeler_analysis,
+    show_sales_wheeler_analysis,
+)
+
+# === Constants ===
+START_2023 = pd.Timestamp("2023-01-01")
 
 
 # === Helpers ===
@@ -71,16 +77,14 @@ def get_cta_por_cobrar(year=None, month=None):
         df_current = df_current[df_current["Fecha"].dt.month == month]
 
     # --- YTD since 2023-01-01 ---
-    df_ytd = df_cxc[df_cxc["Fecha"] >= pd.Timestamp("2023-01-01")].copy()
+    df_ytd = df_cxc[df_cxc["Fecha"] >= START_2023].copy()
 
     # --- Aggregate ---
-    df_curr_summary = (
-        df_current.groupby("Rut", as_index=False)
-        .agg(SaldoTotal=("Saldo", "sum"), FacturasPendientes=("Saldo", "count"))
+    df_curr_summary = df_current.groupby("Rut", as_index=False).agg(
+        SaldoTotal=("Saldo", "sum"), FacturasPendientes=("Saldo", "count")
     )
-    df_ytd_summary = (
-        df_ytd.groupby("Rut", as_index=False)
-        .agg(SaldoTotal=("Saldo", "sum"), FacturasPendientes=("Saldo", "count"))
+    df_ytd_summary = df_ytd.groupby("Rut", as_index=False).agg(
+        SaldoTotal=("Saldo", "sum"), FacturasPendientes=("Saldo", "count")
     )
     return df_curr_summary, df_ytd_summary
 
@@ -99,7 +103,9 @@ def get_kpis(df_current, df_previous, df_pending_current=None, df_pending_ytd=No
     total_sales = df_current["Total"].sum()
     facturas = df_current["Folio"].nunique() if "Folio" in df_current.columns else 0
     total_sales_prev = df_previous["Total"].sum()
-    facturas_prev = df_previous["Folio"].nunique() if "Folio" in df_previous.columns else 0
+    facturas_prev = (
+        df_previous["Folio"].nunique() if "Folio" in df_previous.columns else 0
+    )
 
     # Pending from cuentas_por_cobrar
     pending = pending_invoices = 0
@@ -121,7 +127,10 @@ def get_kpis(df_current, df_previous, df_pending_current=None, df_pending_ytd=No
     if "FechaPago" in df_current.columns:
         mask_paid = df_current["FechaPago"].notna()
         if mask_paid.any():
-            avg_days = (df_current.loc[mask_paid, "FechaPago"] - df_current.loc[mask_paid, "Fecha"]).dt.days.mean()
+            avg_days = (
+                df_current.loc[mask_paid, "FechaPago"]
+                - df_current.loc[mask_paid, "Fecha"]
+            ).dt.days.mean()
 
     return {
         "facturas": (facturas, pct_change(facturas, facturas_prev)),
@@ -132,6 +141,20 @@ def get_kpis(df_current, df_previous, df_pending_current=None, df_pending_ytd=No
         "pending_invoices_ytd": pending_invoices_ytd,
         "avg_days": avg_days,
     }
+
+
+def get_cta_por_cobrar_raw():
+    """Return raw cuentas_por_cobrar data with Fecha and Saldo for Wheeler analysis."""
+    if not DB_PATH.exists():
+        return pd.DataFrame()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        df = pd.read_sql("SELECT Fecha, Saldo FROM cuentas_por_cobrar;", conn)
+    finally:
+        conn.close()
+    df["Fecha"] = pd.to_datetime(df["Fecha"], errors="coerce")
+    df["Saldo"] = pd.to_numeric(df["Saldo"], errors="coerce").fillna(0)
+    return df.dropna(subset=["Fecha"])
 
 
 # === Main View ===
@@ -153,16 +176,18 @@ def show_clients_view():
     month = st.session_state.get("selected_month", "YTD")
     selected_month = None if month == "YTD" else month
 
-    # === Compute KPIs first ===
+    # === Compute KPIs first (GLOBAL/YTD) ===
     df_current = filter_by_period(df_sales, year, selected_month)
-    df_ytd_sales = filter_by_period(df_sales, year)
+    df_since_2023_sales = df_sales[df_sales["Fecha"] >= START_2023]
     df_previous = filter_by_period(df_sales, year - 1, selected_month)
 
     kpis_selected = get_kpis(df_current, df_previous, df_pending, df_pending_ytd)
-    kpis_ytd = get_kpis(df_ytd_sales, df_previous, df_pending, df_pending_ytd)
+    kpis_ytd = get_kpis(df_since_2023_sales, df_previous, df_pending, df_pending_ytd)
 
-    # === KPI SECTION (top of page) ===
-    st.subheader(f"📊 Key Performance Indicators — {year} {'(YTD)' if not selected_month else f'Month {month}'} vs Total since 2023")
+    # === KPI SECTION (kept exactly as you had it) ===
+    st.subheader(
+        f"📊 Key Performance Indicators — {year} {'(YTD)' if not selected_month else f'Month {month}'} vs Total since 2023"
+    )
 
     col1, col2, col3, col4, col5 = st.columns(5)
 
@@ -176,55 +201,101 @@ def show_clients_view():
             unsafe_allow_html=True,
         )
 
-    kpi_dual(col1, "📄 Facturas Emitidas",
-             f"{kpis_selected['facturas'][0]:,}",
-             f"{kpis_ytd['facturas'][0]:,}")
-    kpi_dual(col2, "💰 Venta",
-             f"${kpis_selected['total_sales'][0]:,.0f}",
-             f"${kpis_ytd['total_sales'][0]:,.0f}")
-    kpi_dual(col3, "⏳ Monto Pendiente",
-             f"${kpis_selected['pending']:,.0f}",
-             f"${kpis_selected['pending_ytd']:,.0f}")
-    kpi_dual(col4, "🧾 Fact. Pendientes",
-             f"{int(kpis_selected['pending_invoices']):,}",
-             f"{int(kpis_selected['pending_invoices_ytd']):,}")
+    kpi_dual(
+        col1,
+        "📄 Facturas Emitidas",
+        f"{kpis_selected['facturas'][0]:,}",
+        f"{kpis_ytd['facturas'][0]:,}",
+    )
+    kpi_dual(
+        col2,
+        "💰 Venta",
+        f"${kpis_selected['total_sales'][0]:,.0f}",
+        f"${kpis_ytd['total_sales'][0]:,.0f}",
+    )
+    kpi_dual(
+        col3,
+        "⏳ Monto Pendiente",
+        f"${kpis_selected['pending']:,.0f}",
+        f"${kpis_selected['pending_ytd']:,.0f}",
+    )
+    kpi_dual(
+        col4,
+        "🧾 Fact. Pendientes",
+        f"{int(kpis_selected['pending_invoices']):,}",
+        f"{int(kpis_selected['pending_invoices_ytd']):,}",
+    )
     avg_sel = f"{kpis_selected['avg_days']:.1f}" if kpis_selected["avg_days"] else "N/A"
     avg_ytd = f"{kpis_ytd['avg_days']:.1f}" if kpis_ytd["avg_days"] else "N/A"
     kpi_dual(col5, "🕒 Prom. Días Pago", avg_sel, avg_ytd, " días")
 
     st.divider()
 
-    # === Year / Month and Client Filters (below KPIs) ===
+    # === Year / Month and Client Filters ===
     st.subheader("📅 Period & Client Filters")
 
     c1, c2, c3 = st.columns([2, 1, 1])
-    all_clients = sorted(df_sales["RznSocial"].dropna().unique())
+    # 🔹 Minimal change: prepend "All"
+    all_clients = ["All"] + sorted(df_sales["RznSocial"].dropna().unique())
 
     search_client = c1.text_input("🔍 Search Client")
     filtered_clients = [c for c in all_clients if search_client.lower() in c.lower()]
-    selected_client = c1.selectbox("Select Client", filtered_clients, index=0 if filtered_clients else None)
+    selected_client = c1.selectbox(
+        "Select Client", filtered_clients, index=0 if filtered_clients else None
+    )
 
-    new_year = c2.number_input("Year", min_value=2020, max_value=current_year, value=year)
-    new_month = c3.selectbox("Month", ["YTD"] + list(range(1, 13)), index=0 if month == "YTD" else month)
+    new_year = c2.number_input(
+        "Year", min_value=2020, max_value=current_year, value=year
+    )
+    new_month = c3.selectbox(
+        "Month", ["YTD"] + list(range(1, 13)), index=0 if month == "YTD" else month
+    )
 
-    # Save selections so KPIs update dynamically
+    # Save selections
     st.session_state["selected_year"] = new_year
     st.session_state["selected_month"] = new_month
 
-    # === Refresh Data with updated filters ===
-    df_current = filter_by_period(df_sales, new_year, None if new_month == "YTD" else new_month)
-    df_ytd_sales = filter_by_period(df_sales, new_year)
-    df_previous = filter_by_period(df_sales, new_year - 1, None if new_month == "YTD" else new_month)
-    df_pending, df_pending_ytd = get_cta_por_cobrar(year=new_year, month=None if new_month == "YTD" else new_month)
+    # === Refresh Data ===
+    df_current = filter_by_period(
+        df_sales, new_year, None if new_month == "YTD" else new_month
+    )
+    df_since_2023_sales = df_sales[df_sales["Fecha"] >= START_2023]
+    df_previous = filter_by_period(
+        df_sales, new_year - 1, None if new_month == "YTD" else new_month
+    )
+    df_pending, df_pending_ytd = get_cta_por_cobrar(
+        year=new_year, month=None if new_month == "YTD" else new_month
+    )
 
     st.divider()
 
+    # === Show GLOBAL Wheeler when "All" is selected (KPIs above remain visible) ===
+    if selected_client == "All":
+        # Ventas (All clients)
+        show_sales_wheeler_analysis(df_since_2023_sales, df_current)
+
+        # Cuentas por Cobrar (All clients)
+        df_cxc_raw = get_cta_por_cobrar_raw()
+        if not df_cxc_raw.empty:
+            df_cxc_ytd = df_cxc_raw[df_cxc_raw["Fecha"].dt.year == current_year]
+            if new_month == "YTD":
+                df_cxc_selected = pd.DataFrame()
+            else:
+                df_cxc_selected = df_cxc_raw[
+                    (df_cxc_raw["Fecha"].dt.year == new_year)
+                    & (df_cxc_raw["Fecha"].dt.month == new_month)
+                ]
+            show_cta_por_cobrar_wheeler_analysis(df_cxc_ytd, df_cxc_selected)
+
+        # Stop here—skip client-specific section
+        return
+
     # === Client Details ===
-    if selected_client:
+    if selected_client and selected_client != "All":  # 🔹 Prevent running for "All"
         df_client = df_sales[df_sales["RznSocial"] == selected_client].copy()
         df_client.sort_values("Fecha", ascending=False, inplace=True)
 
-        # === Last 3 purchases (UPDATED: uses Descripcion for products, strips time) ===
+        # === Last 3 Purchases ===
         st.markdown(f"### 🧾 Últimas 3 Compras — {selected_client}")
 
         latest_folios = (
@@ -237,7 +308,6 @@ def show_clients_view():
         df_recent = df_client[df_client["Folio"].isin(latest_folios)].copy()
         df_recent["Fecha"] = pd.to_datetime(df_recent["Fecha"], errors="coerce")
 
-        # Use 'Descripcion' explicitly (fallbacks only if it's missing)
         product_col = "Descripcion" if "Descripcion" in df_recent.columns else None
         if product_col is None:
             for c in ["DescripcionDetallada", "NombreProducto"]:
@@ -252,21 +322,25 @@ def show_clients_view():
                 .agg(
                     Fecha=("Fecha", lambda s: s.max().date()),
                     Total=("Total", "sum"),
-                    Productos=(product_col, lambda s: ", ".join(dict.fromkeys([str(x) for x in s.dropna().tolist()])))
+                    Productos=(
+                        product_col,
+                        lambda s: ", ".join(
+                            dict.fromkeys([str(x) for x in s.dropna().tolist()])
+                        ),
+                    ),
                 )
             )
         else:
-            df_recent_products = (
-                df_recent.groupby("Folio", as_index=False)
-                .agg(
-                    Fecha=("Fecha", lambda s: s.max().date()),
-                    Total=("Total", "sum"),
-                )
+            df_recent_products = df_recent.groupby("Folio", as_index=False).agg(
+                Fecha=("Fecha", lambda s: s.max().date()),
+                Total=("Total", "sum"),
             )
             df_recent_products["Productos"] = "(sin descripción)"
 
-        df_recent_products = df_recent_products.sort_values("Fecha", descending=True) if "descending" in dir(pd.Series.sort_values) else df_recent_products.sort_values("Fecha", ascending=False)
-        df_recent_products["Total"] = df_recent_products["Total"].apply(lambda x: f"${x:,.0f}")
+        df_recent_products = df_recent_products.sort_values("Fecha", ascending=False)
+        df_recent_products["Total"] = df_recent_products["Total"].apply(
+            lambda x: f"${x:,.0f}"
+        )
 
         st.dataframe(
             df_recent_products[["Fecha", "Folio", "Productos", "Total"]],
@@ -275,7 +349,9 @@ def show_clients_view():
 
         # === Client KPIs ===
         df_client_sel = df_current[df_current["RznSocial"] == selected_client]
-        df_client_ytd = df_ytd_sales[df_ytd_sales["RznSocial"] == selected_client]
+        df_client_ytd = df_since_2023_sales[
+            df_since_2023_sales["RznSocial"] == selected_client
+        ]
         df_client_prev = df_previous[df_previous["RznSocial"] == selected_client]
 
         rut_cliente = (
@@ -294,22 +370,56 @@ def show_clients_view():
             else pd.DataFrame(columns=["SaldoTotal", "FacturasPendientes"])
         )
 
-        kpi_sel = get_kpis(df_client_sel, df_client_prev, df_client_pending, df_client_pending_ytd)
-        kpi_ytd = get_kpis(df_client_ytd, df_client_prev, df_client_pending, df_client_pending_ytd)
+        kpi_sel = get_kpis(
+            df_client_sel, df_client_prev, df_client_pending, df_client_pending_ytd
+        )
+        kpi_ytd = get_kpis(
+            df_client_ytd, df_client_prev, df_client_pending, df_client_pending_ytd
+        )
 
         st.markdown(f"### 📈 Desempeño del Cliente — {new_year}")
         c1, c2, c3, c4, c5 = st.columns(5)
-        kpi_dual(c1, "Facturas", f"{kpi_sel['facturas'][0]:,}", f"{kpi_ytd['facturas'][0]:,}")
-        kpi_dual(c2, "Monto Comprado", f"${kpi_sel['total_sales'][0]:,.0f}", f"${kpi_ytd['total_sales'][0]:,.0f}")
-        kpi_dual(c3, "Monto Pendiente", f"${kpi_sel['pending']:,.0f}", f"${kpi_sel['pending_ytd']:,.0f}")
-        kpi_dual(c4, "Facturas Pendientes", f"{int(kpi_sel['pending_invoices']):,}", f"{int(kpi_sel['pending_invoices_ytd']):,}")
+        kpi_dual(
+            c1, "Facturas", f"{kpi_sel['facturas'][0]:,}", f"{kpi_ytd['facturas'][0]:,}"
+        )
+        kpi_dual(
+            c2,
+            "Monto Comprado",
+            f"${kpi_sel['total_sales'][0]:,.0f}",
+            f"${kpi_ytd['total_sales'][0]:,.0f}",
+        )
+        kpi_dual(
+            c3,
+            "Monto Pendiente",
+            f"${kpi_sel['pending']:,.0f}",
+            f"${kpi_sel['pending_ytd']:,.0f}",
+        )
+        kpi_dual(
+            c4,
+            "Facturas Pendientes",
+            f"{int(kpi_sel['pending_invoices']):,}",
+            f"{int(kpi_sel['pending_invoices_ytd']):,}",
+        )
         avg_c = f"{kpi_sel['avg_days']:.1f}" if kpi_sel["avg_days"] else "N/A"
         avg_y = f"{kpi_ytd['avg_days']:.1f}" if kpi_ytd["avg_days"] else "N/A"
         kpi_dual(c5, "Prom. Días Pago", avg_c, avg_y, " días")
 
         st.divider()
-        st.subheader("📉 Wheeler Monthly Trend — Selected vs YTD")
-        show_clients_wheeler_analysis(df_client_ytd, df_client_sel)
+
+        # === Wheeler-style charts ===
+        show_sales_wheeler_analysis(df_client_ytd, df_client_sel)
+
+        df_cxc_raw = get_cta_por_cobrar_raw()
+        if not df_cxc_raw.empty:
+            df_cxc_ytd = df_cxc_raw[df_cxc_raw["Fecha"].dt.year == current_year]
+            if new_month == "YTD":
+                df_cxc_selected = pd.DataFrame()
+            else:
+                df_cxc_selected = df_cxc_raw[
+                    (df_cxc_raw["Fecha"].dt.year == new_year)
+                    & (df_cxc_raw["Fecha"].dt.month == new_month)
+                ]
+            show_cta_por_cobrar_wheeler_analysis(df_cxc_ytd, df_cxc_selected)
 
 
 # === Run in isolation ===
