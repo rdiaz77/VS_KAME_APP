@@ -6,6 +6,8 @@ from pathlib import Path
 import pandas as pd
 import streamlit as st
 
+
+
 # === Paths ===
 DB_PATH = Path(__file__).parent.parent / "data" / "vitroscience.db"
 
@@ -160,9 +162,8 @@ def show_cta_cobrar():
     st.subheader("📊 Análisis de Estabilidad — Wheeler Charts")
 
     try:
-        from dashboard.tabs.cta_por_cobrar_analysis_tab import (
-            show_cta_por_cobrar_analysis,
-        )
+        from dashboard.tabs.statistics.cta_por_cobrar_wheeler_analysis import show_cta_por_cobrar_wheeler_analysis as show_cta_por_cobrar_analysis
+
 
         st.info("🔍 Cargando análisis Wheeler de Cuentas por Cobrar...")
         show_cta_por_cobrar_analysis()  # display full Wheeler charts from the analysis tab
