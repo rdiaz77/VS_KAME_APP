@@ -1,4 +1,4 @@
-# === dashboard/cta_por_cobrar_view.py ===
+# === dashboard/tabs/cta_por_cobrar_analysis_tab.py ===
 import sqlite3
 from datetime import datetime
 from pathlib import Path
@@ -7,28 +7,26 @@ import pandas as pd
 import streamlit as st
 
 # === Paths ===
-DB_PATH = Path(__file__).parent.parent / "data" / "vitroscience.db"
+DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "vitroscience.db"
 
 
-def show_cta_cobrar():
-    """Main dashboard page for 'Cuentas por Cobrar' with KPIs, table, and ranking."""
-    st.title("💰 Cuentas por Cobrar")
+def show_cta_por_cobrar_analysis():
+    """Main tab for analyzing 'Cuentas por Cobrar' with KPIs, filters, and Wheeler stats."""
+    st.title("💰 Cuentas por Cobrar — Análisis Financiero")
 
+    # === Load Data ===
     if not DB_PATH.exists():
-        st.error(
-            "❌ Base de datos no encontrada. Ejecuta la actualización de datos primero."
-        )
+        st.error("❌ Database not found. Please run the data pipeline first.")
         return
 
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql("SELECT * FROM cuentas_por_cobrar;", conn)
-
     if df.empty:
-        st.warning("⚠️ No se encontraron registros de cuentas por cobrar.")
+        st.warning("⚠️ No outstanding data found.")
         conn.close()
         return
 
-    # === Convert types ===
+    # Convert numeric and date columns
     for col in ["Saldo", "Total", "TotalCP"]:
         df[col] = (
             df[col].astype(str).str.replace(",", "").replace("", "0").astype(float)
@@ -36,7 +34,7 @@ def show_cta_cobrar():
     for col in ["Fecha", "FechaVencimiento"]:
         df[col] = pd.to_datetime(df[col], errors="coerce")
 
-    # === Filtros ===
+    # === Filters ===
     st.sidebar.header("🔍 Filtros")
     vendedores = ["Todos"] + sorted(df["NombreVendedor"].dropna().unique().tolist())
     selected_vendedor = st.sidebar.selectbox("👨‍💼 Vendedor", vendedores, index=0)
@@ -64,7 +62,6 @@ def show_cta_cobrar():
     # === KPIs ===
     st.divider()
     st.subheader("📈 Indicadores Clave (KPI)")
-
     total_facturas = len(df_filtered)
     total_saldo = df_filtered["Saldo"].sum()
     vencidas = (df_filtered["FechaVencimiento"] < datetime.now()).sum()
@@ -79,7 +76,7 @@ def show_cta_cobrar():
         f"{dias_prom:.1f}" if not pd.isna(dias_prom) else "N/A",
     )
 
-    # === Tabla principal ===
+    # === Status Table ===
     st.divider()
     st.subheader("📋 Detalle de Facturas Pendientes")
 
@@ -114,9 +111,9 @@ def show_cta_cobrar():
 
     st.dataframe(df_display, use_container_width=True, hide_index=True)
 
-    # === Ranking Histórico ===
+    # === Ranking ===
     st.divider()
-    st.subheader("🏆 Ranking de Clientes por Tiempo Promedio de Pago")
+    st.subheader("🏆 Ranking Histórico por Tiempo de Pago")
 
     try:
         df_hist = pd.read_sql(
@@ -135,7 +132,6 @@ def show_cta_cobrar():
                 .reset_index()
                 .sort_values("avg_dias")
             )
-
             ranking["avg_dias"] = ranking["avg_dias"].round(1)
             ranking.insert(0, "Rank", range(1, len(ranking) + 1))
 
@@ -151,31 +147,31 @@ def show_cta_cobrar():
                 use_container_width=True,
             )
         else:
-            st.info("ℹ️ No hay facturas pagadas aún para calcular el ranking.")
+            st.info("ℹ️ No hay registros de facturas pagadas para el ranking.")
     except Exception as e:
-        st.warning(f"⚠️ Error generando ranking: {e}")
+        st.warning(f"No se pudo generar el ranking: {e}")
 
-    # === Wheeler Analysis Section ===
+    # === Wheeler Section (now guaranteed to execute) ===
     st.divider()
-    st.subheader("📊 Análisis de Estabilidad — Wheeler Charts")
+    st.subheader("📊 Wheeler Analysis — Pending Balance Stability")
+    st.write("🧭 DEBUG: Entering Wheeler section...")
 
     try:
-        from dashboard.tabs.cta_por_cobrar_analysis_tab import (
-            show_cta_por_cobrar_analysis,
-        )
+        from dashboard.tabs.statistics import cta_por_cobrar_wheeler_analysis
 
-        st.info("🔍 Cargando análisis Wheeler de Cuentas por Cobrar...")
-        show_cta_por_cobrar_analysis()  # display full Wheeler charts from the analysis tab
+        st.write("✅ Wheeler module imported successfully.")
+        cta_por_cobrar_wheeler_analysis.show_cta_por_cobrar_wheeler_analysis()
+        st.write("✅ Wheeler function executed.")
     except Exception as e:
-        st.error(f"❌ Error cargando análisis Wheeler: {e}")
+        st.error(f"❌ Wheeler section error: {e}")
 
     finally:
         conn.close()
 
     st.markdown("---")
     st.caption(
-        "📊 Datos desde cuentas_por_cobrar y cuentas_por_cobrar_history en vitroscience.db."
+        "📊 Data source: `cuentas_por_cobrar` and `cuentas_por_cobrar_history` in vitroscience.db."
     )
 
 
-# === END dashboard/cta_por_cobrar_view.py ===
+# === END dashboard/tabs/cta_por_cobrar_analysis_tab.py ===

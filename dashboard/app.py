@@ -14,16 +14,19 @@ from dashboard.cta_por_cobrar_view import show_cta_cobrar
 from dashboard.cta_por_pagar_view import show_cta_pagar
 from dashboard.inventario_view import show_inventario
 
-# --- Local imports ---
+# === Local Imports ===
 from dashboard.scorecard_view import show_scorecard
 from dashboard.settings_view import show_settings
 from dashboard.ventas_view import show_ventas
 
-# === Streamlit config ===
+# === Streamlit Config ===
 st.set_page_config(page_title="VitroScience Dashboard", layout="wide")
 
 # === Sidebar Navigation ===
 st.sidebar.title("📊 Navigation")
+st.sidebar.markdown("👤 **Logged in as:** VitroScience Admin")
+st.sidebar.markdown("---")
+
 page = st.sidebar.radio(
     "Go to:",
     [
@@ -40,16 +43,26 @@ page = st.sidebar.radio(
 # === Page Routing ===
 if page == "🏠 Scorecard":
     show_scorecard()
+
 elif page == "💰 Ventas":
     show_ventas()
+
 elif page == "👥 Clientes":
     show_clientes()
+
 elif page == "📦 Inventario":
     show_inventario()
+
 elif page == "💰 Ctas por Cobrar":
     show_cta_cobrar()
+
 elif page == "🧾 Ctas por Pagar":
     show_cta_pagar()
+
 elif page == "⚙️ Settings":
     show_settings()
-# === End of dashboard/app.py ===
+
+# === Footer ===
+st.sidebar.markdown("---")
+st.sidebar.caption("🧠 Developed for **VitroScience**  |  Data sourced from KAME ERP")
+# === END dashboard/app.py ===
