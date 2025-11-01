@@ -9,7 +9,8 @@ ROOT_DIR = Path(__file__).resolve().parent.parent  # Points to VS_KAME_APP
 if str(ROOT_DIR) not in sys.path:
     sys.path.insert(0, str(ROOT_DIR))  # ensure it’s at the front
 
-from dashboard.clientes_view import show_clientes
+# ✅ Correct import if file is under dashboard/
+from dashboard.clients_view import show_clients_view
 from dashboard.cta_por_cobrar_view import show_cta_cobrar
 from dashboard.cta_por_pagar_view import show_cta_pagar
 from dashboard.inventario_view import show_inventario
@@ -48,7 +49,7 @@ elif page == "💰 Ventas":
     show_ventas()
 
 elif page == "👥 Clientes":
-    show_clientes()
+    show_clients_view()  # ✅ Call the clients view
 
 elif page == "📦 Inventario":
     show_inventario()
